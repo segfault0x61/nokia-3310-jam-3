@@ -2,11 +2,11 @@
 # Variables
 ###############################################################################
 CC = gcc
-CC_FLAGS = -D_GNU_SOURCE -std=c99 -Wfatal-errors
+CC_FLAGS = -std=c99 -Wfatal-errors
 SRC = ./src/*.c
 
 ifeq ($(OS),Windows_NT) 
-	LINKER_FLAGS = -lmingw32 -mwindows
+	LINKER_FLAGS = -lmingw32
 else
 	LINKER_FLAGS = -lm 
 endif
