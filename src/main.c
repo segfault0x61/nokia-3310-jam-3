@@ -9,30 +9,37 @@
 #include <stdlib.h>
 
 const char* window_title = "Nokia 3310 Jam 3";
-const uint32_t step_size = 40; // 8 ms is approx. 120hz, 16 is approx. 60hz... etc.
-const int resolution_scale = 10;
+const uint32_t step_size = 16; // 8 ms is approx. 120hz, 16 is approx. 60hz... etc.
+const int resolution_scale = 8;
 const int window_width = 84 * resolution_scale;
 const int window_height = 48 * resolution_scale;
 const float steps_per_second = (float)(step_size)*0.001f;
 const SDL_Color bg_color = { 0xC7, 0xF0, 0xD8, 0xFF };
 
-const uint8_t ball_radius = 1.6 * resolution_scale;  // Pixels
-const float player_width = 3.2f * resolution_scale;  // Pixels
-const float player_height = 3.2f * resolution_scale; // Pixels
+const uint8_t ball_radius = 1.0f * resolution_scale;  // Pixels
+const float player_width = 2.0f * resolution_scale;  // Pixels
+const float player_height = 2.0f * resolution_scale; // Pixels
 const float player_max_velocity = 30.0f * resolution_scale; // pixels/s
 
-const float gravity = 80.0f * resolution_scale;                  // pixels/s
-const float bounce_velocity = 60.0f * resolution_scale;          // pixels/s
-const float ball_horizontal_velocity = 20.0f * resolution_scale; // pixels/s
-const float jump_velocity = 50.0f * resolution_scale;            // pixels/s
+const float gravity = 80.0f * resolution_scale; // pixels/s
+
+const float ball_bounce_vx = 20.0f * resolution_scale; // pixels/s
+const float ball_bounce_vy = 60.0f * resolution_scale; // pixels/s
+const float jump_velocity = 50.0f * resolution_scale;  // pixels/s
 
 const float time_to_max_velocity = 1.8f * resolution_scale;  // steps
 const float time_to_zero_velocity = 1.8f * resolution_scale; // steps
 const float time_to_pivot = 1.2f * resolution_scale;         // steps
 
+const uint32_t max_num_platforms = 32;
+
 typedef struct {
     float px, py, vx, vy;
 } body_t;
+
+typedef struct {
+    float x, y, w, h;
+} platform_t;
 
 bool check_collision_circle_rect(float, float, float, float, float, float, float);
 bool check_collision_rect_rect(float, float, float, float, float, float, float, float);
@@ -66,22 +73,46 @@ int main(int argc, char** argv) {
     loading_surf = IMG_Load("res/guy.png");
     SDL_Texture *player_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
+    loading_surf = IMG_Load("res/platform.png");
+    SDL_Texture *platform_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+
     body_t ball = {
         .px = 30.0f * resolution_scale,
         .py = 20.0f * resolution_scale,
-        .vx = 20.0f * resolution_scale,
+        .vx = 0.0f,
         .vy = 0.0f,
     };
     body_t player = {
-        .px = 60.0f * resolution_scale,
-        .py = 40.0f * resolution_scale,
+        .px = 30.0f * resolution_scale,
+        .py = 50.0f * resolution_scale,
         .vx = 0.0f,
         .vy = 0.0f,
     };
 
+    platform_t platforms[max_num_platforms];
+    memset(platforms, 0, max_num_platforms * sizeof(platform_t));
+    platforms[0].x = 16.0f * resolution_scale;
+    platforms[0].y = 36.0f * resolution_scale;
+    platforms[0].h = 1.6f * resolution_scale;
+    platforms[0].w = 12.8f * resolution_scale;
+    platforms[1].x = 900.0f;
+    platforms[1].y = 560.0f;
+    platforms[1].h = 16.0f;
+    platforms[1].w = 128.0f;
+    platforms[2].x = 600.0f;
+    platforms[2].y = 500.0f;
+    platforms[2].h = 16.0f;
+    platforms[2].w = 128.0f;
+    platforms[3].x = 1000.0f;
+    platforms[3].y = 680.0f;
+    platforms[3].h = 16.0f;
+    platforms[3].w = 128.0f;   
+
     uint32_t last_step_ticks = 0;
     float last_ball_px = 0.0f;
     float last_ball_py = 0.0f;
+    float last_player_px = 0.0f;
+    float last_player_py = 0.0f;
 
     bool left_pressed = false;
     bool right_pressed = false;
@@ -135,6 +166,7 @@ int main(int argc, char** argv) {
         ball.vy += steps_per_second * gravity;
         ball.px += steps_per_second * ball.vx;
         ball.py += steps_per_second * ball.vy;
+
         if (ball.py + ball_radius > window_height) {
             ball.vy *= -1.0f;
         }
@@ -146,6 +178,8 @@ int main(int argc, char** argv) {
         }
 
         // Step player.
+        last_player_px = player.px;
+        last_player_py = player.py;
         if (left_pressed ^ right_pressed) {
             if (left_pressed) {
                 if (player.vx > 0.0f) {
@@ -170,6 +204,7 @@ int main(int argc, char** argv) {
         if (jump_pressed) {
             if (player_on_ground) {
                 player.vy = -jump_velocity;
+                player_on_ground = false;
             }
             jump_pressed = false;
         }
@@ -186,20 +221,42 @@ int main(int argc, char** argv) {
             player_on_ground = false;
         }
 
-        // Check for collision between ball and player.
-        bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, player.px, player.py, player_width, player_height);
-        if (collision) {
-            ball.py = player.py - ball_radius;
-            ball.vy = -bounce_velocity;
+        // Check for collision between ball and player
+        {
+            bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, player.px, player.py, player_width, player_height);
+            if (collision && last_ball_py < player.py && ball.vy > 0) {
+                ball.py = player.py - ball_radius;
+                ball.vy = -ball_bounce_vy;
 
-            if (left_pressed ^ right_pressed) {
-                ball.vx = left_pressed ? -ball_horizontal_velocity : ball_horizontal_velocity;
-            } else {
-                ball.vx = 0.0f;
+                if (left_pressed ^ right_pressed) {
+                    ball.vx = left_pressed ? -ball_bounce_vx : ball_bounce_vx;
+                } else {
+                    ball.vx = 0.0f;
+                }
             }
         }
 
-        // Render.
+        // Check for collision between ball and platform or player and platform
+        for (int i = 0; i < max_num_platforms; i++) {
+            platform_t *platform = &platforms[i];
+            {
+                bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, platform->x, platform->y, platform->w, platform->h);
+                if (collision && last_ball_py < platform->y && ball.vy > 0) {
+                    ball.py = platform->y - ball_radius;
+                    ball.vy = -ball.vy;
+                }
+            }
+            {
+                bool collision = check_collision_rect_rect(player.px, player.py, player_width, player_height, platform->x, platform->y, platform->w, platform->h);
+                if (collision && last_player_py + player_height - 0.001f < platform->y && player.vy > 0) {
+                    player.py = platform->y - player_height;
+                    player.vy = 0.0f;
+                    player_on_ground = true;
+                }
+            }
+        }
+
+        // Render
         SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
         SDL_RenderClear(renderer);
         {
@@ -210,7 +267,11 @@ int main(int argc, char** argv) {
             SDL_Rect dst_rect = {.x = (int)player.px, .y = (int)player.py, .w = (int)player_width, .h = (int)player_height};
             SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
         }
-
+        for (int i = 0; i < max_num_platforms; i++) {
+            platform_t *platform = &platforms[i];
+            SDL_Rect dst_rect = {.x = (int)platform->x, .y = (int)platform->y, .w = (int)platform->w, .h = (int)platform->h};
+            SDL_RenderCopy(renderer, platform_texture, NULL, &dst_rect);
+        }
         SDL_RenderPresent(renderer);
     }
 
