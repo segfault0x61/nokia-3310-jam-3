@@ -10,7 +10,7 @@
 
 const char* window_title = "Nokia 3310 Jam 3";
 const uint32_t step_size = 16; // 8 ms is approx. 120hz, 16 is approx. 60hz... etc.
-const int resolution_scale = 8;
+const int resolution_scale = 10;
 const int window_width = 84 * resolution_scale;
 const int window_height = 48 * resolution_scale;
 const float steps_per_second = (float)(step_size)*0.001f;
@@ -30,6 +30,7 @@ const float jump_velocity = 50.0f * resolution_scale;  // pixels/s
 const float time_to_max_velocity = 1.8f * resolution_scale;  // steps
 const float time_to_zero_velocity = 1.8f * resolution_scale; // steps
 const float time_to_pivot = 1.2f * resolution_scale;         // steps
+const float time_to_squash = 1.2f * resolution_scale;        // steps
 
 const uint32_t max_num_platforms = 32;
 
@@ -91,22 +92,22 @@ int main(int argc, char** argv) {
 
     platform_t platforms[max_num_platforms];
     memset(platforms, 0, max_num_platforms * sizeof(platform_t));
-    platforms[0].x = 16.0f * resolution_scale;
+    platforms[0].x = 36.0f * resolution_scale;
     platforms[0].y = 36.0f * resolution_scale;
     platforms[0].h = 1.6f * resolution_scale;
-    platforms[0].w = 12.8f * resolution_scale;
-    platforms[1].x = 900.0f;
-    platforms[1].y = 560.0f;
-    platforms[1].h = 16.0f;
-    platforms[1].w = 128.0f;
-    platforms[2].x = 600.0f;
-    platforms[2].y = 500.0f;
-    platforms[2].h = 16.0f;
-    platforms[2].w = 128.0f;
-    platforms[3].x = 1000.0f;
-    platforms[3].y = 680.0f;
-    platforms[3].h = 16.0f;
-    platforms[3].w = 128.0f;   
+    platforms[0].w = 9.6f * resolution_scale;
+    platforms[1].x = 60.0f * resolution_scale;
+    platforms[1].y = 40.0f * resolution_scale;
+    platforms[1].h = 1.6f * resolution_scale;
+    platforms[1].w = 9.6f * resolution_scale;
+    platforms[2].x = 50.0f * resolution_scale;
+    platforms[2].y = 30.0f * resolution_scale;
+    platforms[2].h = 1.6f * resolution_scale;
+    platforms[2].w = 9.6f * resolution_scale;
+    platforms[3].x = 45.0f * resolution_scale;
+    platforms[3].y = 20.0f * resolution_scale;
+    platforms[3].h = 1.6f * resolution_scale;
+    platforms[3].w = 9.6f * resolution_scale;   
 
     uint32_t last_step_ticks = 0;
     float last_ball_px = 0.0f;
@@ -118,6 +119,10 @@ int main(int argc, char** argv) {
     bool right_pressed = false;
     bool jump_pressed = false;
     bool player_on_ground = false;
+    bool player_carrying_ball = false;
+
+    float player_carry_offset = 0.0f;
+    uint8_t ball_carry_time = 0;
 
     while (1) {
         SDL_Event e;
@@ -148,6 +153,9 @@ int main(int argc, char** argv) {
                 case SDLK_RIGHT:
                     right_pressed = false;
                     break;
+                case SDLK_SPACE:
+                    jump_pressed = false;
+                    break;                    
                 default:
                     break;
                 }
@@ -206,7 +214,6 @@ int main(int argc, char** argv) {
                 player.vy = -jump_velocity;
                 player_on_ground = false;
             }
-            jump_pressed = false;
         }
 
         player.vy += steps_per_second * gravity;
@@ -221,18 +228,32 @@ int main(int argc, char** argv) {
             player_on_ground = false;
         }
 
-        // Check for collision between ball and player
-        {
-            bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, player.px, player.py, player_width, player_height);
-            if (collision && last_ball_py < player.py && ball.vy > 0) {
+        // Squash ball
+        if (player_carrying_ball) {
+            if (ball_carry_time < time_to_squash) {
+                ball.px = player.px + player_carry_offset;
+                ball.py = player.py - ball_radius;
+                ball_carry_time++;
+            } else {
                 ball.py = player.py - ball_radius;
                 ball.vy = -ball_bounce_vy;
-
                 if (left_pressed ^ right_pressed) {
                     ball.vx = left_pressed ? -ball_bounce_vx : ball_bounce_vx;
                 } else {
                     ball.vx = 0.0f;
                 }
+                player_carrying_ball = false;
+                ball_carry_time = 0;
+            }
+        }
+
+        // Check for collision between ball and player
+        {
+            bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, player.px, player.py, player_width, player_height);
+            if (collision && last_ball_py < player.py && ball.vy > 0) {
+                // Enter carry state.
+                player_carry_offset = ball.px - player.px;
+                player_carrying_ball = true;
             }
         }
 
@@ -261,6 +282,17 @@ int main(int argc, char** argv) {
         SDL_RenderClear(renderer);
         {
             SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = (int)(ball.py - ball_radius), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
+            if (player_carrying_ball) {
+                float pct = (float)ball_carry_time / (float)time_to_squash;
+                pct *= 2;
+                pct -= 1;
+                pct = pct * pct * pct * pct;
+                pct = 1 - pct;
+                dst_rect.x -= pct * ball_radius / 2;
+                dst_rect.w += pct * ball_radius;
+                dst_rect.y += pct * ball_radius * 5 / 8;
+                dst_rect.h -= pct * ball_radius * 5 / 8;
+            }            
             SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
         }
         {
