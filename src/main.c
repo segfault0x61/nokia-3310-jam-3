@@ -7,7 +7,7 @@
 #include <stdlib.h>
 
 const char* window_title = "Nokia 3310 Jam 3";
-const uint32_t step_size = 8; // 8 ms is approx. 120hz
+const uint32_t step_size = 40; // 8 ms is approx. 120hz, 16 is approx. 60hz... etc.
 const int resolution_scale = 10;
 const int window_width = 84 * resolution_scale;
 const int window_height = 48 * resolution_scale;
@@ -17,12 +17,12 @@ const SDL_Color bg_color = { 0xC7, 0xF0, 0xD8, 0xFF };
 const uint8_t ball_radius = 1.6 * resolution_scale;
 const float player_width = 3.2f * resolution_scale;
 const float player_height = 3.2f * resolution_scale;
-const float player_speed = 300.0f; // pixels/s
+const float player_speed = 30.0f * resolution_scale; // pixels/s
 
-const float gravity = 400.0f;
-const float bounce_velocity = 400.0f;
-const float ball_horizontal_velocity = 200.0f;
-const float jump_velocity = 200.0f;
+const float gravity = 40.0f * resolution_scale;
+const float bounce_velocity = 40.0f * resolution_scale;
+const float ball_horizontal_velocity = 20.0f * resolution_scale;
+const float jump_velocity = 20.0f * resolution_scale;
 
 typedef struct {
     float px, py, vx, vy;
@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    SDL_Window* win = SDL_CreateWindow(window_title, 100, 100, window_width, window_height, 0);
+    SDL_Window* win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, 0);
     if (win == NULL) {
         return EXIT_FAILURE;
     }
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+    // SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
 
     SDL_Surface* loading_surf;
     loading_surf = IMG_Load("res/ball.png");
@@ -57,14 +57,14 @@ int main(int argc, char** argv) {
     SDL_Texture *player_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
     body_t ball = {
-        .px = 300.0f,
-        .py = 200.0f,
-        .vx = 200.0f,
+        .px = 30.0f * resolution_scale,
+        .py = 20.0f * resolution_scale,
+        .vx = 20.0f * resolution_scale,
         .vy = 0.0f,
     };
     body_t player = {
-        .px = 600.0f,
-        .py = 400.0f,
+        .px = 60.0f * resolution_scale,
+        .py = 40.0f * resolution_scale,
         .vx = 0.0f,
         .vy = 0.0f,
     };
