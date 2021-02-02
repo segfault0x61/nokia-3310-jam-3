@@ -8,29 +8,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-const char* window_title = "Nokia 3310 Jam 3";
-const uint32_t step_size = 16; // 8 ms is approx. 120hz, 16 is approx. 60hz... etc.
-const int resolution_scale = 10;
-const int window_width = 84 * resolution_scale;
-const int window_height = 48 * resolution_scale;
+const char *window_title = "Nokia 3310 Jam #3";
+const uint32_t scale = 10;
+const uint32_t screen_width = 84 * scale;
+const uint32_t screen_height = 48 * scale;
+const uint32_t step_size = 16; // 8 ms is approx. 120Hz, 16 ms approx. 60hz... etc.
 const float steps_per_second = (float)(step_size)*0.001f;
 const SDL_Color bg_color = { 0xC7, 0xF0, 0xD8, 0xFF };
 
-const uint8_t ball_radius = 1.0f * resolution_scale;  // Pixels
-const float player_width = 2.0f * resolution_scale;  // Pixels
-const float player_height = 2.0f * resolution_scale; // Pixels
-const float player_max_velocity = 30.0f * resolution_scale; // pixels/s
+const float ball_radius = 1.0f * scale;  // pixels
+const float player_width = 2.f * scale;  // pixels
+const float player_height = 2.f * scale; // pixels
 
-const float gravity = 80.0f * resolution_scale; // pixels/s
+const float gravity = 80.0f * scale; // pixels/s/s
 
-const float ball_bounce_vx = 20.0f * resolution_scale; // pixels/s
-const float ball_bounce_vy = 60.0f * resolution_scale; // pixels/s
-const float jump_velocity = 50.0f * resolution_scale;  // pixels/s
+const float ball_bounce_vx = 20.0f * scale;       // pixels/s
+const float ball_bounce_vy = 60.0f * scale;       // pixels/s
+const float player_max_velocity = 30.0f * scale;  // pixels/s
+const float player_jump_velocity = 40.0f * scale; // pixels/s
 
-const float time_to_max_velocity = 1.8f * resolution_scale;  // steps
-const float time_to_zero_velocity = 1.8f * resolution_scale; // steps
-const float time_to_pivot = 1.2f * resolution_scale;         // steps
-const float time_to_squash = 1.2f * resolution_scale;        // steps
+const uint32_t coyote_time = 8; // steps
+
+const float time_to_max_velocity = 1.8f * scale;  // steps
+const float time_to_zero_velocity = 1.8f * scale; // steps
+const float time_to_pivot = 1.2f * scale;         // steps
+const float time_to_squash = 1.2f * scale;        // steps
+const float time_to_max_jump = 3.2f * scale;      // steps
 
 const uint32_t max_num_platforms = 32;
 
@@ -45,6 +48,7 @@ typedef struct {
 bool check_collision_circle_rect(float, float, float, float, float, float, float);
 bool check_collision_rect_rect(float, float, float, float, float, float, float, float);
 
+float hold_jump(float);
 float accelerate(float);
 float decelerate(float);
 float pivot(float);
@@ -54,60 +58,77 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
-    SDL_Window* win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, window_width, window_height, 0);
+    SDL_Window *win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, 0);
     if (win == NULL) {
         return EXIT_FAILURE;
     }
 
-    SDL_Renderer* renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+    SDL_Renderer *renderer =
+        SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (renderer == NULL) {
         return EXIT_FAILURE;
     }
 
-    // SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
+    SDL_Surface *loading_surf;
 
-    SDL_Surface* loading_surf;
     loading_surf = IMG_Load("res/ball.png");
+    SDL_Texture *ball_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
-    SDL_Texture* ball_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
-
-    loading_surf = IMG_Load("res/guy.png");
+    loading_surf = IMG_Load("res/player.png");
     SDL_Texture *player_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    loading_surf = IMG_Load("res/player_jumping.png");
+    SDL_Texture *player_jumping_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
     loading_surf = IMG_Load("res/platform.png");
     SDL_Texture *platform_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    loading_surf = IMG_Load("res/player_platform.png");
+    SDL_Texture *player_platform_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
     body_t ball = {
-        .px = 30.0f * resolution_scale,
-        .py = 20.0f * resolution_scale,
+        .px = 28.0f * scale + ball_radius,
+        .py = 20.0f  * scale,
         .vx = 0.0f,
-        .vy = 0.0f,
+        .vy = -30.0f * scale,
     };
+
     body_t player = {
-        .px = 30.0f * resolution_scale,
-        .py = 50.0f * resolution_scale,
+        .px = 28.0f * scale,
+        .py = 35.0f * scale,
         .vx = 0.0f,
         .vy = 0.0f,
     };
 
     platform_t platforms[max_num_platforms];
     memset(platforms, 0, max_num_platforms * sizeof(platform_t));
-    platforms[0].x = 36.0f * resolution_scale;
-    platforms[0].y = 36.0f * resolution_scale;
-    platforms[0].h = 1.6f * resolution_scale;
-    platforms[0].w = 9.6f * resolution_scale;
-    platforms[1].x = 60.0f * resolution_scale;
-    platforms[1].y = 40.0f * resolution_scale;
-    platforms[1].h = 1.6f * resolution_scale;
-    platforms[1].w = 9.6f * resolution_scale;
-    platforms[2].x = 50.0f * resolution_scale;
-    platforms[2].y = 30.0f * resolution_scale;
-    platforms[2].h = 1.6f * resolution_scale;
-    platforms[2].w = 9.6f * resolution_scale;
-    platforms[3].x = 45.0f * resolution_scale;
-    platforms[3].y = 20.0f * resolution_scale;
-    platforms[3].h = 1.6f * resolution_scale;
-    platforms[3].w = 9.6f * resolution_scale;   
+    platforms[0].x = 25.0f * scale;
+    platforms[0].y = 45.0f * scale;
+    platforms[0].h = 2.0f * scale;
+    platforms[0].w = 10.0f * scale;
+
+    platforms[1].x = 40.0f * scale;
+    platforms[1].y = 45.0f * scale - 1.0f * player_height;
+    platforms[1].h = 2.0f * scale;
+    platforms[1].w = 10.0f * scale;
+
+    platforms[2].x = 40.0f * scale;
+    platforms[2].y = 45.0f * scale - 3.0f * player_height;
+    platforms[2].h = 2.0f * scale;
+    platforms[2].w = 10.0f * scale;
+
+    platforms[3].x = 40.0f * scale;
+    platforms[3].y = 45.0f * scale - 5.0f * player_height;
+    platforms[3].h = 2.0f * scale;
+    platforms[3].w = 10.0f * scale;
+
+    platforms[4].x = 40.0f * scale;
+    platforms[4].y = 45.0f * scale - 7.0f * player_height;
+    platforms[4].h = 2.0f * scale;
+    platforms[4].w = 10.0f * scale;
+
+    platforms[5].x = 40.0f * scale;
+    platforms[5].y = 45.0f * scale - 9.0f * player_height;
+    platforms[5].h = 2.0f * scale;
+    platforms[5].w = 10.0f * scale;
 
     uint32_t last_step_ticks = 0;
     float last_ball_px = 0.0f;
@@ -120,9 +141,13 @@ int main(int argc, char** argv) {
     bool jump_pressed = false;
     bool player_on_ground = false;
     bool player_carrying_ball = false;
+    bool player_jumping = false;
 
     float player_carry_offset = 0.0f;
-    uint8_t ball_carry_time = 0;
+    uint32_t ball_carry_time = 0;
+    uint32_t air_time = 0;
+
+    platform_t *player_platform = NULL;
 
     while (1) {
         SDL_Event e;
@@ -155,7 +180,7 @@ int main(int argc, char** argv) {
                     break;
                 case SDLK_SPACE:
                     jump_pressed = false;
-                    break;                    
+                    break;
                 default:
                     break;
                 }
@@ -168,24 +193,14 @@ int main(int argc, char** argv) {
         }
         last_step_ticks = ticks - ticks % step_size;
 
-        // Step ball.
+        // Step ball
         last_ball_px = ball.px;
         last_ball_py = ball.py;
         ball.vy += steps_per_second * gravity;
         ball.px += steps_per_second * ball.vx;
         ball.py += steps_per_second * ball.vy;
 
-        if (ball.py + ball_radius > window_height) {
-            ball.vy *= -1.0f;
-        }
-        if (ball.px + ball_radius > window_width) {
-            ball.vx *= -1.0f;
-        }
-        if (ball.px - ball_radius < 0) {
-            ball.vx *= -1.0f;
-        }
-
-        // Step player.
+        // Step player
         last_player_px = player.px;
         last_player_py = player.py;
         if (left_pressed ^ right_pressed) {
@@ -210,23 +225,17 @@ int main(int argc, char** argv) {
             }
         }
         if (jump_pressed) {
-            if (player_on_ground) {
-                player.vy = -jump_velocity;
+            if (player_on_ground || air_time < coyote_time) {
                 player_on_ground = false;
+                player_jumping = true;
+            }
+            if (air_time < time_to_max_jump) {
+                player.vy = -hold_jump(-player.vy);
             }
         }
-
         player.vy += steps_per_second * gravity;
         player.px += steps_per_second * player.vx;
         player.py += steps_per_second * player.vy;
-
-        if (player.py + player_height > window_height) {
-            player.vy = 0;
-            player.py = window_height - player_height;
-            player_on_ground = true;
-        } else {
-            player_on_ground = false;
-        }
 
         // Squash ball
         if (player_carrying_ball) {
@@ -251,13 +260,14 @@ int main(int argc, char** argv) {
         {
             bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, player.px, player.py, player_width, player_height);
             if (collision && last_ball_py < player.py && ball.vy > 0) {
-                // Enter carry state.
+                // Enter carry state
                 player_carry_offset = ball.px - player.px;
                 player_carrying_ball = true;
             }
         }
 
         // Check for collision between ball and platform or player and platform
+        player_platform = NULL;
         for (int i = 0; i < max_num_platforms; i++) {
             platform_t *platform = &platforms[i];
             {
@@ -270,16 +280,37 @@ int main(int argc, char** argv) {
             {
                 bool collision = check_collision_rect_rect(player.px, player.py, player_width, player_height, platform->x, platform->y, platform->w, platform->h);
                 if (collision && last_player_py + player_height - 0.001f < platform->y && player.vy > 0) {
+                    player_platform = platform;
                     player.py = platform->y - player_height;
                     player.vy = 0.0f;
                     player_on_ground = true;
+                    player_jumping = false;
                 }
             }
+        }
+        if (player_platform == NULL) {
+            player_on_ground = false;
+        }
+
+        // Increment air time counter
+        if (!player_on_ground) {
+            air_time++;
+        } else {
+            air_time = 0;
         }
 
         // Render
         SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
         SDL_RenderClear(renderer);
+        for (int i = 0; i < max_num_platforms; i++) {
+            platform_t *platform = &platforms[i];
+            SDL_Rect dst_rect = {.x = (int)platform->x, .y = (int)platform->y, .w = (int)platform->w, .h = (int)platform->h};
+            if (platform == player_platform) {
+                SDL_RenderCopy(renderer, player_platform_texture, NULL, &dst_rect);
+            } else {
+                SDL_RenderCopy(renderer, platform_texture, NULL, &dst_rect);
+            }
+        }
         {
             SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = (int)(ball.py - ball_radius), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
             if (player_carrying_ball) {
@@ -292,17 +323,16 @@ int main(int argc, char** argv) {
                 dst_rect.w += pct * ball_radius;
                 dst_rect.y += pct * ball_radius * 5 / 8;
                 dst_rect.h -= pct * ball_radius * 5 / 8;
-            }            
+            }
             SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
         }
         {
             SDL_Rect dst_rect = {.x = (int)player.px, .y = (int)player.py, .w = (int)player_width, .h = (int)player_height};
-            SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
-        }
-        for (int i = 0; i < max_num_platforms; i++) {
-            platform_t *platform = &platforms[i];
-            SDL_Rect dst_rect = {.x = (int)platform->x, .y = (int)platform->y, .w = (int)platform->w, .h = (int)platform->h};
-            SDL_RenderCopy(renderer, platform_texture, NULL, &dst_rect);
+            if (player_jumping && jump_pressed && air_time < time_to_max_jump) {
+                SDL_RenderCopy(renderer, player_jumping_texture, NULL, &dst_rect);
+            } else {
+                SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
+            }
         }
         SDL_RenderPresent(renderer);
     }
@@ -312,7 +342,7 @@ int main(int argc, char** argv) {
 
     SDL_Quit();
 
-    return EXIT_SUCCESS;
+    return 0;
 }
 
 bool check_collision_rect_rect(float ax, float ay, float aw, float ah, float bx, float by, float bw, float bh) {
@@ -364,8 +394,29 @@ float square(float x) {
     return x * x;
 }
 
+float quadric(float x) {
+    return x * x * x * x;
+}
+
+float quadrt(float x) {
+    return sqrt(sqrt(x));
+}
+
+float quintic(float x) {
+    return x * x * x * x * x;
+}
+
+float quintic_root(float x) {
+    return pow(x, .2f);
+}
+
 float identity(float x) {
     return x;
+}
+
+// Return a value larger than or equal to velocity (positive values only)
+float hold_jump(float velocity) {
+    return fmin(player_jump_velocity, player_jump_velocity * quintic_root(quintic(velocity / player_jump_velocity) + 1.0f / time_to_max_jump));
 }
 
 // Return a value larger than or equal to velocity (positive values only)
@@ -373,12 +424,12 @@ float accelerate(float velocity) {
     return fmin(player_max_velocity, player_max_velocity * square(sqrt(velocity / player_max_velocity) + 1.0f / time_to_max_velocity));
 }
 
-// Return a value less than velocit that approaches zero (positive values only)
+// Return a value less than velocity that approaches zero (positive values only)
 float decelerate(float velocity) {
     return fmax(0.0f, velocity - player_max_velocity / time_to_zero_velocity);
 }
 
-// Return a value less than velocity that approaches zero (positive values only) 
+// Return a value less than velocity that approaches zero (positive values only)
 float pivot(float velocity) {
     return fmax(0.0f, velocity - player_max_velocity / time_to_pivot);
 }
