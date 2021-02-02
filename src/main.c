@@ -1,6 +1,8 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
+#include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -14,15 +16,19 @@ const int window_height = 48 * resolution_scale;
 const float steps_per_second = (float)(step_size)*0.001f;
 const SDL_Color bg_color = { 0xC7, 0xF0, 0xD8, 0xFF };
 
-const uint8_t ball_radius = 1.6 * resolution_scale;
-const float player_width = 3.2f * resolution_scale;
-const float player_height = 3.2f * resolution_scale;
-const float player_speed = 30.0f * resolution_scale; // pixels/s
+const uint8_t ball_radius = 1.6 * resolution_scale;  // Pixels
+const float player_width = 3.2f * resolution_scale;  // Pixels
+const float player_height = 3.2f * resolution_scale; // Pixels
+const float player_max_velocity = 30.0f * resolution_scale; // pixels/s
 
-const float gravity = 40.0f * resolution_scale;
-const float bounce_velocity = 40.0f * resolution_scale;
-const float ball_horizontal_velocity = 20.0f * resolution_scale;
-const float jump_velocity = 20.0f * resolution_scale;
+const float gravity = 80.0f * resolution_scale;                  // pixels/s
+const float bounce_velocity = 60.0f * resolution_scale;          // pixels/s
+const float ball_horizontal_velocity = 20.0f * resolution_scale; // pixels/s
+const float jump_velocity = 50.0f * resolution_scale;            // pixels/s
+
+const float time_to_max_velocity = 1.8f * resolution_scale;  // steps
+const float time_to_zero_velocity = 1.8f * resolution_scale; // steps
+const float time_to_pivot = 1.2f * resolution_scale;         // steps
 
 typedef struct {
     float px, py, vx, vy;
@@ -30,6 +36,10 @@ typedef struct {
 
 bool check_collision_circle_rect(float, float, float, float, float, float, float);
 bool check_collision_rect_rect(float, float, float, float, float, float, float, float);
+
+float accelerate(float);
+float decelerate(float);
+float pivot(float);
 
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO)) {
@@ -137,9 +147,25 @@ int main(int argc, char** argv) {
 
         // Step player.
         if (left_pressed ^ right_pressed) {
-            player.vx = left_pressed ? -player_speed : player_speed;
+            if (left_pressed) {
+                if (player.vx > 0.0f) {
+                    player.vx = pivot(player.vx);
+                } else {
+                    player.vx = -accelerate(-player.vx);
+                }
+            } else {
+                if (player.vx < 0.0f) {
+                    player.vx = -pivot(-player.vx);
+                } else {
+                    player.vx = accelerate(player.vx);
+                }
+            }
         } else {
-            player.vx = 0;
+            if (player.vx > 0.0f) {
+                player.vx = decelerate(player.vx);
+            } else {
+                player.vx = -decelerate(-player.vx);
+            }
         }
         if (jump_pressed) {
             if (player_on_ground) {
@@ -239,4 +265,27 @@ bool check_collision_circle_rect(float cx, float cy, float cr, float rx, float r
     float rr = cr * cr;
 
     return d0 < rr || d1 < rr || d2 < rr || d3 < rr;
+}
+
+float square(float x) {
+    return x * x;
+}
+
+float identity(float x) {
+    return x;
+}
+
+// Return a value larger than or equal to velocity (positive values only)
+float accelerate(float velocity) {
+    return fmin(player_max_velocity, player_max_velocity * square(sqrt(velocity / player_max_velocity) + 1.0f / time_to_max_velocity));
+}
+
+// Return a value less than velocit that approaches zero (positive values only)
+float decelerate(float velocity) {
+    return fmax(0.0f, velocity - player_max_velocity / time_to_zero_velocity);
+}
+
+// Return a value less than velocity that approaches zero (positive values only) 
+float pivot(float velocity) {
+    return fmax(0.0f, velocity - player_max_velocity / time_to_pivot);
 }
