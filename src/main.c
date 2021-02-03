@@ -55,6 +55,8 @@ const float camera_move_factor = 0.04f;
 
 const uint32_t max_num_bricks = 256;
 
+const char *game_over_text = " press R to restart ";
+
 typedef struct {
     float px, py, vx, vy;
 } body_t;
@@ -118,12 +120,29 @@ int main(int argc, char** argv) {
 
     int glyph_width, glyph_height;
     TTF_SizeText(font, "a", &glyph_width, &glyph_height);
-    SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };
-    SDL_Texture *number_textures[10];
+    SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };    
+    SDL_Texture *white_number_textures[10];
+    SDL_Texture *yellow_number_textures[10];
     for (int i = 0; i < 10; i++) {
         loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
-        number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
+        white_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
+        loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
+        yellow_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
     }
+
+    int game_over_text_width, game_over_text_height;
+    TTF_SizeText(font, game_over_text, &game_over_text_width, &game_over_text_height);
+    loading_surf = TTF_RenderText_Shaded(font, game_over_text, text_color, bg_color);
+    SDL_Texture *game_over_text_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+
+    int high_score = 0;
+
+    // SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };
+    // SDL_Texture *number_textures[10];
+    // for (int i = 0; i < 10; i++) {
+    //     loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
+    //     number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    // }
 
 init:;    
 
@@ -368,6 +387,9 @@ init:;
                 hit_brick->y = 0;
                 hit_brick = NULL;
                 score++;
+                if (score > high_score) {
+                    high_score = score;
+                }                
             }
         }
 
@@ -396,6 +418,10 @@ init:;
         player_brick = NULL;
         for (int i = 0; i < max_num_bricks; i++) {
             brick_t *brick = &bricks[i];
+            if (brick->y + brick_height < camera_y) {
+                // Off-screen bricks don't have collision
+                continue;
+            }
             {
                 bool collision =
                     check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
@@ -460,65 +486,81 @@ init:;
 
         // Render
         SDL_RenderClear(renderer);
-        for (int i = 0; i < max_num_bricks; i++) {
-            brick_t *brick = &bricks[i];
-            if (brick->x == 0 && brick->y == 0) {
-                continue;
+        if (!game_over) {
+            for (int i = 0; i < max_num_bricks; i++) {
+                brick_t *brick = &bricks[i];
+                if (brick->x == 0 && brick->y == 0) {
+                    continue;
+                }
+                SDL_Rect dst_rect = {.x = (int)brick->x, .y = screen_height - (int)(brick->y + brick_height - camera_y), .w = (int)brick_width, .h = (int)brick_height};
+                dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+                SDL_Rect wrap_rect = dst_rect;
+                wrap_rect.x -= screen_width;
+                SDL_RenderCopy(renderer, brick_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, brick_texture, NULL, &wrap_rect);
             }
-            SDL_Rect dst_rect = {.x = (int)brick->x, .y = screen_height - (int)(brick->y + brick_height - camera_y), .w = (int)brick_width, .h = (int)brick_height};
-            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
-            SDL_Rect wrap_rect = dst_rect;
-            wrap_rect.x -= screen_width;
-            SDL_RenderCopy(renderer, brick_texture, NULL, &dst_rect);
-            SDL_RenderCopy(renderer, brick_texture, NULL, &wrap_rect);
-        }
-        {
-            SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = screen_height - (int)(ball.py + ball_radius - camera_y), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
-            if (player_carrying_ball || ball_bouncing) {
-                const int ball_squash_width = 2.0f * ball_radius;
-                float x = ball.px - (float)ball_squash_width / 2.0f;
-                dst_rect.w = ball_squash_width;
-                dst_rect.x = x;
-            }
-            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
-            SDL_Rect wrap_rect = dst_rect;
-            wrap_rect.x -= screen_width;            
-            if (player_carrying_ball || ball_bouncing) {
-                SDL_RenderCopy(renderer, ball_squash_texture, NULL, &dst_rect);
-                SDL_RenderCopy(renderer, ball_squash_texture, NULL, &wrap_rect);
-            } else {
-                SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
-                SDL_RenderCopy(renderer, ball_texture, NULL, &wrap_rect);
-            }
-        }
-        {
-            SDL_Rect dst_rect = {.x = (int)player.px, .y = screen_height - (int)(player.py + player_height - camera_y), .w = (int)player_width, .h = (int)player_height};
-            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
-            SDL_Rect wrap_rect = dst_rect;
-            wrap_rect.x -= screen_width;
-            if (player_on_ground || air_time < coyote_time) {
-                SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
-                SDL_RenderCopy(renderer, player_texture, NULL, &wrap_rect);
-            } else {
-                if (player_jumping) {
-                    SDL_RenderCopy(renderer, player_jumping_texture, NULL, &dst_rect);
-                    SDL_RenderCopy(renderer, player_jumping_texture, NULL, &wrap_rect);
+            {
+                SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = screen_height - (int)(ball.py + ball_radius - camera_y), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
+                if (player_carrying_ball || ball_bouncing) {
+                    const int ball_squash_width = 2.0f * ball_radius;
+                    float x = ball.px - (float)ball_squash_width / 2.0f;
+                    dst_rect.w = ball_squash_width;
+                    dst_rect.x = x;
+                }
+                dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+                SDL_Rect wrap_rect = dst_rect;
+                wrap_rect.x -= screen_width;            
+                if (player_carrying_ball || ball_bouncing) {
+                    SDL_RenderCopy(renderer, ball_squash_texture, NULL, &dst_rect);
+                    SDL_RenderCopy(renderer, ball_squash_texture, NULL, &wrap_rect);
                 } else {
-                    SDL_RenderCopy(renderer, player_fall_texture, NULL, &dst_rect);
-                    SDL_RenderCopy(renderer, player_fall_texture, NULL, &wrap_rect);
+                    SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
+                    SDL_RenderCopy(renderer, ball_texture, NULL, &wrap_rect);
                 }
             }
+            {
+                SDL_Rect dst_rect = {.x = (int)player.px, .y = screen_height - (int)(player.py + player_height - camera_y), .w = (int)player_width, .h = (int)player_height};
+                dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+                SDL_Rect wrap_rect = dst_rect;
+                wrap_rect.x -= screen_width;
+                if (player_on_ground || air_time < coyote_time) {
+                    SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
+                    SDL_RenderCopy(renderer, player_texture, NULL, &wrap_rect);
+                } else {
+                    if (player_jumping) {
+                        SDL_RenderCopy(renderer, player_jumping_texture, NULL, &dst_rect);
+                        SDL_RenderCopy(renderer, player_jumping_texture, NULL, &wrap_rect);
+                    } else {
+                        SDL_RenderCopy(renderer, player_fall_texture, NULL, &dst_rect);
+                        SDL_RenderCopy(renderer, player_fall_texture, NULL, &wrap_rect);
+                    }
+                }
+            }
+            {
+                int digit = score;
+                int i = 0;
+                do {
+                    SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - 2.0f * glyph_height, glyph_width, glyph_height};
+                    SDL_RenderCopy(renderer, white_number_textures[digit % 10], NULL, &dst_rect);
+                    digit /= 10;
+                    i++;
+                } while (digit > 0);
+            }
+            {
+                int digit = high_score;
+                int i = 0;
+                do {
+                    SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - glyph_height, glyph_width, glyph_height};
+                    SDL_RenderCopy(renderer, yellow_number_textures[digit % 10], NULL, &dst_rect);
+                    digit /= 10;
+                    i++;
+                } while (digit > 0);
+            }            
         }
-        {
-            int digit = score;
-            int i = 0;
-            do {
-                SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - glyph_height, glyph_width, glyph_height};
-                SDL_RenderCopy(renderer, number_textures[digit % 10], NULL, &dst_rect);
-                digit /= 10;
-                i++;
-            } while (digit > 0);
-        }        
+        if (game_over) {
+            SDL_Rect dst_rect = {screen_width * 0.5f - game_over_text_width * 0.5f, screen_height * 0.5f - game_over_text_height * 0.5f, game_over_text_width, game_over_text_height};
+            SDL_RenderCopy(renderer, game_over_text_texture, NULL, &dst_rect);
+        }
         SDL_RenderPresent(renderer);
     }
 
