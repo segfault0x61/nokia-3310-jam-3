@@ -1,5 +1,6 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
 
 #include <assert.h>
 #include <math.h>
@@ -77,6 +78,10 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    if (TTF_Init()) {
+        return EXIT_FAILURE;
+    }
+
     SDL_Window *win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, 0);
     if (win == NULL) {
         return EXIT_FAILURE;
@@ -108,6 +113,20 @@ int main(int argc, char** argv) {
     loading_surf = IMG_Load("res/brick.png");
     SDL_Texture *brick_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
+    TTF_Font *font = TTF_OpenFont("res/EffortsPro.ttf", 16.0f * scale);
+    assert(font != NULL);
+
+    int glyph_width, glyph_height;
+    TTF_SizeText(font, "a", &glyph_width, &glyph_height);
+    SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };
+    SDL_Texture *number_textures[10];
+    for (int i = 0; i < 10; i++) {
+        loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
+        number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    }
+
+init:;    
+
     srand(time(NULL));
     float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
     float start_y = 12.8f * scale;
@@ -124,10 +143,10 @@ int main(int argc, char** argv) {
 
     brick_t bricks[max_num_bricks];
     memset(bricks, 0, max_num_bricks * sizeof(brick_t));
-    bricks[0].x = start_x - 6.4f * scale;
-    bricks[0].y = start_y + 6.4f * scale;
+    bricks[0].x = start_x - 6.0f * scale;
+    bricks[0].y = start_y + 6.0f * scale;
     bricks[1].x = start_x;
-    bricks[1].y = start_y + 6.4f * scale;
+    bricks[1].y = start_y + 6.0f * scale;
 
     float last_x = start_x;
     float last_y = start_y;
@@ -181,6 +200,9 @@ int main(int argc, char** argv) {
     brick_t *player_brick = NULL;
     brick_t *hit_brick = NULL;
 
+    bool game_over = false;
+    uint32_t score = 0;
+
     while (1) {
         SDL_Event e;
         if (SDL_PollEvent(&e)) {
@@ -204,6 +226,9 @@ int main(int argc, char** argv) {
                 case SDLK_DOWN:
                 case SDLK_s:
                     down_pressed = true;
+                    break;
+                case SDLK_r:
+                    goto init;
                     break;
                 case SDLK_SPACE:
                     time_since_jump_press = 0;
@@ -235,6 +260,10 @@ int main(int argc, char** argv) {
             }
         }
     after_handle_input:;
+
+        if (game_over) {
+            continue;
+        }
 
         uint32_t ticks = SDL_GetTicks();
         if (ticks - last_step_ticks < step_size) {
@@ -293,7 +322,7 @@ int main(int argc, char** argv) {
         player.px += steps_per_second * player.vx;
         player.py += steps_per_second * player.vy;
 
-        // Squash ball.
+        // Squash ball
         if (player_carrying_ball) {
             ball.py = player.py + player_height + ball_radius;
             if (ball_carry_time < time_to_squash) {
@@ -333,10 +362,18 @@ int main(int argc, char** argv) {
                 ball.py = stored_ball_py;
                 ball_bouncing = false;
                 ball_bounce_time = 0;
+
+                // Break brick
                 hit_brick->x = 0;
                 hit_brick->y = 0;
                 hit_brick = NULL;
+                score++;
             }
+        }
+
+        // Check if ball falls off the bottom of screen
+        if (ball.py + ball_radius < camera_y) {
+            game_over = true;
         }
 
         // Check for collision between ball and player
@@ -425,6 +462,9 @@ int main(int argc, char** argv) {
         SDL_RenderClear(renderer);
         for (int i = 0; i < max_num_bricks; i++) {
             brick_t *brick = &bricks[i];
+            if (brick->x == 0 && brick->y == 0) {
+                continue;
+            }
             SDL_Rect dst_rect = {.x = (int)brick->x, .y = screen_height - (int)(brick->y + brick_height - camera_y), .w = (int)brick_width, .h = (int)brick_height};
             dst_rect.x = positive_fmod(dst_rect.x, screen_width);
             SDL_Rect wrap_rect = dst_rect;
@@ -469,6 +509,16 @@ int main(int argc, char** argv) {
                 }
             }
         }
+        {
+            int digit = score;
+            int i = 0;
+            do {
+                SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - glyph_height, glyph_width, glyph_height};
+                SDL_RenderCopy(renderer, number_textures[digit % 10], NULL, &dst_rect);
+                digit /= 10;
+                i++;
+            } while (digit > 0);
+        }        
         SDL_RenderPresent(renderer);
     }
 
@@ -476,6 +526,7 @@ int main(int argc, char** argv) {
     SDL_DestroyWindow(win);
 
     SDL_Quit();
+    TTF_Quit();
 
     return 0;
 }
