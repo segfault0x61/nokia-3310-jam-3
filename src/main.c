@@ -27,7 +27,7 @@ const float gravity = 80.0f * scale; // pixels/s/s
 const float fast_gravity = 240.0f * scale; // pixels/s/s
 
 const float ball_bounce_vx = 20.0f * scale;                 // pixels/s
-const float ball_bounce_vy = 60.0f * scale;                 // pixels/s
+const float ball_bounce_vy = 64.0f * scale;                 // pixels/s
 const float ball_light_bounce_vx = 8.0f * scale;            // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
@@ -131,9 +131,9 @@ int main(int argc, char** argv) {
 
     float last_x = start_x;
     float last_y = start_y;
-    for (int i = 3; i < 60; i += 3) {
-        float x = rand_range(-1.0f, 1.0f) > 0.0f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 3.0f * brick_width, last_x);
-        float y = last_y + 6.4f * scale;
+    for (int i = 3; i < 255; i += 3) {
+        float x = rand_range(0.0f, 1.0f) > 0.5f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 9.0f * brick_width, last_x - 6.0f * brick_width);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
         bricks[i].x = last_x - brick_width / 2.0f;
