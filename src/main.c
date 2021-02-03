@@ -45,6 +45,9 @@ const float time_to_pivot = 1.2f * scale;              // steps
 const float time_to_squash = 1.2f * scale;             // steps
 const float time_to_max_jump = 6.4f * scale;           // steps
 
+const float camera_focus_bottom_margin = 12.8f * scale;
+const float camera_move_factor = 0.04f;
+
 const uint32_t max_num_platforms = 32;
 
 typedef struct {
@@ -65,6 +68,7 @@ float decelerate(float);
 float pivot(float);
 
 float rand_range(float, float);
+float positive_fmod(float, float);
 
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO)) {
@@ -118,44 +122,13 @@ int main(int argc, char** argv) {
     platforms[0].h = 2.0f * scale;
     platforms[0].w = 10.0f * scale;
 
-    // platforms[1].x = 40.0f * scale;
-    // platforms[1].y = 45.0f * scale - 1.0f * player_height;
-    // platforms[1].h = 2.0f * scale;
-    // platforms[1].w = 10.0f * scale;
-
-    // platforms[2].x = 40.0f * scale;
-    // platforms[2].y = 45.0f * scale - 3.0f * player_height;
-    // platforms[2].h = 2.0f * scale;
-    // platforms[2].w = 10.0f * scale;
-
-    // platforms[3].x = 40.0f * scale;
-    // platforms[3].y = 45.0f * scale - 5.0f * player_height;
-    // platforms[3].h = 2.0f * scale;
-    // platforms[3].w = 10.0f * scale;
-
-    // platforms[4].x = 40.0f * scale;
-    // platforms[4].y = 45.0f * scale - 7.0f * player_height;
-    // platforms[4].h = 2.0f * scale;
-    // platforms[4].w = 10.0f * scale;
-
-    // platforms[5].x = 40.0f * scale;
-    // platforms[5].y = 45.0f * scale - 9.0f * player_height;
-    // platforms[5].h = 2.0f * scale;
-    // platforms[5].w = 10.0f * scale;
-
-    const int loaded_platform_levels = 4;
-    int j = 1;
-    for (int i = 0; i < loaded_platform_levels; i++) {
-        j++;
-        platforms[j].x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
-        platforms[j].y = start_y + j * player_height;
-        platforms[j].w = 10.0f * scale;
-        platforms[j].h = 2.0f * scale;
-        j++;
-        platforms[j].x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
-        platforms[j].y = start_y + j * player_height;
-        platforms[j].w = 10.0f * scale;
-        platforms[j].h = 2.0f * scale;
+    const int loaded_platforms = 16;
+    const float range = (float)screen_width / 3.0f;
+    for (int i = 1; i < loaded_platforms; i++) {
+        platforms[i].x = rand_range(platforms[i - 1].x, platforms[i - 1].x + range);
+        platforms[i].y = start_y + i * 2.0f * player_height;
+        platforms[i].w = 10.0f * scale;
+        platforms[i].h = 2.0f * scale;
     }
 
     uint32_t last_step_ticks = 0;
@@ -176,12 +149,16 @@ int main(int argc, char** argv) {
     float stored_ball_vx = 0.0f;
     float stored_ball_vy = 0.0f;
     float stored_ball_py = 0.0f;
+
     uint32_t ball_carry_time = 0;
     uint32_t ball_bounce_time = 0;
     uint32_t air_time = 0;
     uint32_t jump_time = 0;
     uint32_t time_since_jump_press = max_time;
     uint32_t time_since_jump_release = max_time - 1;
+
+    float camera_y = 0.0f;
+    float camera_focus_y = platforms[0].y;
 
     platform_t *player_platform = NULL;
 
@@ -337,8 +314,11 @@ int main(int argc, char** argv) {
         
         // Check for collision between ball and player
         {
-            bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, player.px, player.py, player_width, player_height);
-            if (collision && last_ball_py > player.py + player_height && ball.vy < 0) {
+                bool collision =
+                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                            positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height) ||
+                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                            positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height);            if (collision && last_ball_py > player.py + player_height && ball.vy < 0) {
                 // Enter carry state
                 player_carry_offset = ball.px - player.px;
                 player_carrying_ball = true;
@@ -350,7 +330,11 @@ int main(int argc, char** argv) {
         for (int i = 0; i < max_num_platforms; i++) {
             platform_t *platform = &platforms[i];
             {
-                bool collision = check_collision_circle_rect(ball.px, ball.py, ball_radius, platform->x, platform->y, platform->w, platform->h);
+                bool collision =
+                    check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                                positive_fmod(platform->x, (float)screen_width), platform->y, platform->w, platform->h) ||
+                    check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                                positive_fmod(platform->x, (float)screen_width), platform->y, platform->w, platform->h);
                 if (collision && last_ball_py - ball_radius + 0.001f > platform->y + platform->h && ball.vy < 0) {
                     ball.py = platform->y + platform->h + ball_radius;
                     if (ball.vy > -ball_no_bounce_velocity) {
@@ -366,8 +350,13 @@ int main(int argc, char** argv) {
                 }
             }
             {
-                bool collision = check_collision_rect_rect(player.px, player.py, player_width, player_height, platform->x, platform->y, platform->w, platform->h);
+                bool collision =
+                    check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
+                                              positive_fmod(platform->x, (float)screen_width), platform->y, platform->w, platform->h) ||
+                    check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
+                                              positive_fmod(platform->x, (float)screen_width) - screen_width, platform->y, platform->w, platform->h);
                 if (collision && last_player_py + 0.001f > platform->y + platform->h && player.vy < 0) {
+                    camera_focus_y = platform->y;
                     player_platform = platform;
                     player.py = platform->y + platform->h;
                     player.vy = 0.0f;
@@ -378,6 +367,12 @@ int main(int argc, char** argv) {
         }
         if (player_platform == NULL) {
             player_on_ground = false;
+        }
+
+        // Move camera
+        float camera_target_y = camera_focus_y - camera_focus_bottom_margin;
+        if (fabs(camera_y - camera_target_y) > 0.001f) {
+            camera_y = (1.0f - camera_move_factor) * camera_y + camera_move_factor * camera_target_y;
         }
 
         // Increment counters
@@ -403,15 +398,23 @@ int main(int argc, char** argv) {
         SDL_RenderClear(renderer);
         for (int i = 0; i < max_num_platforms; i++) {
             platform_t *platform = &platforms[i];
-            SDL_Rect dst_rect = {.x = (int)platform->x, .y = screen_height - (int)(platform->y + platform->h), .w = (int)platform->w, .h = (int)platform->h};
+            SDL_Rect dst_rect = {.x = (int)platform->x, .y = screen_height - (int)(platform->y + platform->h - camera_y), .w = (int)platform->w, .h = (int)platform->h};
+            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+            SDL_Rect wrap_rect = dst_rect;
+            wrap_rect.x -= screen_width;
             if (platform == player_platform) {
                 SDL_RenderCopy(renderer, player_platform_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, player_platform_texture, NULL, &wrap_rect);
             } else {
                 SDL_RenderCopy(renderer, platform_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, platform_texture, NULL, &wrap_rect);
             }
         }
         {
-            SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = screen_height - (int)(ball.py + ball_radius), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
+            SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = screen_height - (int)(ball.py + ball_radius - camera_y), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
+            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+            SDL_Rect wrap_rect = dst_rect;
+            wrap_rect.x -= screen_width;            
             if (player_carrying_ball) {
                 float pct = (float)ball_carry_time / (float)time_to_squash;
                 pct *= 2;
@@ -435,13 +438,19 @@ int main(int argc, char** argv) {
                 dst_rect.h -= pct * ball_radius * 5 / 8;
             }            
             SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
+            SDL_RenderCopy(renderer, ball_texture, NULL, &wrap_rect);
         }
         {
-            SDL_Rect dst_rect = {.x = (int)player.px, .y = screen_height - (int)(player.py + player_height), .w = (int)player_width, .h = (int)player_height};
+            SDL_Rect dst_rect = {.x = (int)player.px, .y = screen_height - (int)(player.py + player_height - camera_y), .w = (int)player_width, .h = (int)player_height};
+            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+            SDL_Rect wrap_rect = dst_rect;
+            wrap_rect.x -= screen_width;
             if (player_jumping) {
                 SDL_RenderCopy(renderer, player_jumping_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, player_jumping_texture, NULL, &wrap_rect);
             } else {
                 SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, player_texture, NULL, &wrap_rect);
             }
         }
         SDL_RenderPresent(renderer);
@@ -555,4 +564,12 @@ float pivot(float velocity) {
 float rand_range(float min, float max) {
     float r = (float)rand() / (float)RAND_MAX;
     return min + r * (max - min);
+}
+
+float positive_fmod(float x, float mod) {
+    float xm = fmod(x, mod);
+    if (xm < 0) {
+        return xm + mod;
+    }
+    return xm;
 }
