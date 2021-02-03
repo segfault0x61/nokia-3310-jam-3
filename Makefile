@@ -11,7 +11,7 @@ else
 	LINKER_FLAGS = -lm 
 endif
 
-LINKER_FLAGS += -lSDL2main -lSDL2 -lSDL2_image -lSDL2_mixer
+LINKER_FLAGS += -lSDL2main -lSDL2 -lSDL2_image -lSDL2_mixer -lSDL2_ttf
 
 BIN_NAME = game
 
