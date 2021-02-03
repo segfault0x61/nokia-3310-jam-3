@@ -33,8 +33,8 @@ const float ball_bounce_vy = 64.0f * scale;                 // pixels/s
 const float ball_light_bounce_vx = 8.0f * scale;            // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
-const float player_jump_velocity = 50.0f * scale;           // pixels/s
-const float player_max_jump_height = 10.0f * player_height;  // pixels
+const float player_jump_velocity = 55.0f * scale;           // pixels/s
+const float player_max_jump_height = 12.0f * player_height;  // pixels
 
 const float ball_bounce_attenuation = 0.95f;
 const float jump_release_attenuation = 0.9f;
