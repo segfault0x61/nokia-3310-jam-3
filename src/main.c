@@ -28,8 +28,10 @@ const float fast_gravity = 240.0f * scale; // pixels/s/s
 
 const float ball_bounce_vx = 20.0f * scale;                 // pixels/s
 const float ball_bounce_vy = 60.0f * scale;                 // pixels/s
+const float ball_light_bounce_vx = 8.0f * scale;            // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
+const float player_jump_velocity = 44.0f * scale;           // pixels/s
 const float player_max_jump_height = 8.0f * player_height;  // pixels
 
 const float ball_bounce_attenuation = 0.95f;
@@ -63,8 +65,6 @@ typedef struct {
 bool check_collision_circle_rect(float, float, float, float, float, float, float);
 bool check_collision_rect_rect(float, float, float, float, float, float, float, float);
 
-float jump_velocity(float);
-float fall_velocity(float);
 float accelerate(float);
 float decelerate(float);
 float pivot(float);
@@ -124,13 +124,28 @@ int main(int argc, char** argv) {
     bricks[1].x = start_x;
     bricks[1].y = start_y + 6.4f * scale;
 
+    float last_x = start_x;
+    float last_y = start_y;
+    for (int i = 3; i < 60; i += 3) {
+        float x = rand_range(-1.0f, 1.0f) > 0.0f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 3.0f * brick_width, last_x);
+        float y = last_y + 6.4f * scale;
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    int next_brick = 0;
+
     uint32_t last_step_ticks = 0;
     float last_ball_px = 0.0f;
     float last_ball_py = 0.0f;
     float last_player_px = 0.0f;
     float last_player_py = 0.0f;
-    brick_t *hit_brick1 = NULL;
-    brick_t *hit_brick2 = NULL;
 
     bool left_pressed = false;
     bool right_pressed = false;
@@ -139,6 +154,9 @@ int main(int argc, char** argv) {
     bool player_carrying_ball = false;
     bool player_jumping = false;
     bool ball_bouncing = false;
+
+    bool left_pressed_entering_carry_state = false;
+    bool right_pressed_entering_carry_state = false;
 
     float player_carry_offset = 0.0f;
     float stored_ball_vx = 0.0f;
@@ -156,6 +174,7 @@ int main(int argc, char** argv) {
     float camera_focus_y = bricks[0].y;
 
     brick_t *player_brick = NULL;
+    brick_t *hit_brick = NULL;
 
     while (1) {
         SDL_Event e;
@@ -179,7 +198,8 @@ int main(int argc, char** argv) {
                     break;
                 case SDLK_DOWN:
                 case SDLK_s:
-                    down_pressed = true;                    
+                    down_pressed = true;
+                    break;
                 case SDLK_SPACE:
                     time_since_jump_press = 0;
                     break;
@@ -220,7 +240,9 @@ int main(int argc, char** argv) {
         // Step ball
         last_ball_px = ball.px;
         last_ball_py = ball.py;
-        ball.vy -= steps_per_second * gravity;
+        if (!ball_bouncing) {
+            ball.vy -= steps_per_second * gravity;
+        }
         ball.px += steps_per_second * ball.vx;
         ball.py += steps_per_second * ball.vy;
 
@@ -248,37 +270,25 @@ int main(int argc, char** argv) {
                 player.vx = -decelerate(-player.vx);
             }
         }
-        // Try to jump
+        // Initiate jump if possible
         if (time_since_jump_press < time_to_buffer_jump) {
-            // Jump has just been pressed/triggered
+            // Jump has just been pressed or is buffered
             if (player_on_ground || air_time < coyote_time) {
                 // Player is able to jump
-                player.vy = player_max_jump_height * jump_velocity(0.0f);
+                player.vy = player_jump_velocity;
                 player_jumping = true;
             }
         }
-        if (time_since_jump_press >= time_since_jump_release || jump_time > time_to_max_jump) {
-            // Either jump button was released or max jump has already been reached.
+        if (jump_time > time_to_max_jump) {
+            // Max jump has been reached
             player_jumping = false;
         }
-        if (player_jumping) {
-            player.vy = player_max_jump_height * jump_velocity((float)jump_time / time_to_max_jump);
-        } else {
-            if (player.vy > 10.0f) {
-                // Attenuate vertical velocity when, say, jump button was released.
-                player.vy *= jump_release_attenuation;
-            }
-            if (down_pressed) {
-                player.vy = fmax(-player_terminal_velocity, player.vy - steps_per_second * fast_gravity);
-            } else {
-                player.vy = fmax(-player_terminal_velocity, player.vy - steps_per_second * gravity);
-            }
-        }
 
+        player.vy -= steps_per_second * gravity;
         player.px += steps_per_second * player.vx;
         player.py += steps_per_second * player.vy;
 
-        // Squash ball
+        // Squash ball.
         if (player_carrying_ball) {
             ball.py = player.py + player_height + ball_radius;
             if (ball_carry_time < time_to_squash) {
@@ -287,10 +297,24 @@ int main(int argc, char** argv) {
             } else {
                 ball.vy = ball_bounce_vy;
                 if (left_pressed ^ right_pressed) {
-                    ball.vx = left_pressed ? -ball_bounce_vx : ball_bounce_vx;
+                    if (left_pressed) {
+                        if (left_pressed_entering_carry_state) {
+                            ball.vx = -ball_bounce_vx;
+                        } else {
+                            ball.vx = -ball_light_bounce_vx;
+                        }
+                    } else if (right_pressed) {
+                        if (right_pressed_entering_carry_state) {
+                            ball.vx = ball_bounce_vx;
+                        } else {
+                            ball.vx = ball_light_bounce_vx;
+                        }
+                    }
                 } else {
                     ball.vx = 0.0f;
                 }
+                right_pressed_entering_carry_state = false;
+                left_pressed_entering_carry_state = false;
                 player_carrying_ball = false;
                 ball_carry_time = 0;
             }
@@ -304,43 +328,24 @@ int main(int argc, char** argv) {
                 ball.py = stored_ball_py;
                 ball_bouncing = false;
                 ball_bounce_time = 0;
-
-                if (hit_brick1 != NULL) {
-                    hit_brick1->x = 0;
-                    hit_brick1->y = 0;
-                    hit_brick1 = NULL;
-                }
-                if (hit_brick2 != NULL) {
-                    hit_brick2->x = 0;
-                    hit_brick2->y = 0;
-                    hit_brick2 = NULL;
-                }                
+                hit_brick->x = 0;
+                hit_brick->y = 0;
+                hit_brick = NULL;
             }
         }
-        
+
         // Check for collision between ball and player
-        {
-                bool collision =
-                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                            positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height) ||
-                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                            positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height);            if (collision && last_ball_py > player.py + player_height && ball.vy < 0) {
-                // Enter carry state
-                player_carry_offset = ball.px - player.px;
-                player_carrying_ball = true;
-            }
-        }
-
-        // Check for collision between ball and player.
-        {
+        if (!player_carrying_ball) {
             bool collision =
                 check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
                                             positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height) ||
                 check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
                                             positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height);
             if (collision && last_ball_py > player.py + player_height && ball.vy < 0) {
-                // Enter carry state.
+                // Enter carry state
                 player_carry_offset = ball.px - player.px;
+                left_pressed_entering_carry_state = left_pressed;
+                right_pressed_entering_carry_state = right_pressed;
                 player_carrying_ball = true;
             }
         }
@@ -357,21 +362,13 @@ int main(int argc, char** argv) {
                                                 positive_fmod(brick->x, (float)screen_width) - screen_width, brick->y, brick_width, brick_height);
                 if (collision && last_ball_py - ball_radius + 0.001f > brick->y + brick_height && ball.vy < 0) {
                     ball.py = brick->y + brick_height + ball_radius;
-                    if (ball.vy > -ball_no_bounce_velocity) {
-                        ball.vy = 0.0f;
-                    } else {
-                        ball_bouncing = true;
-                        stored_ball_vx = ball.vx;
-                        stored_ball_vy = -ball_bounce_attenuation * ball.vy;
-                        ball.vx = 0.0f;
-                        ball.vy = 0.0f;
-                        stored_ball_py = ball.py;
-                        if (hit_brick1 == NULL) {
-                            hit_brick1 = brick;
-                        } else if (hit_brick2 == NULL) {
-                            hit_brick2 = brick;
-                        }
-                    }
+                    ball_bouncing = true;
+                    stored_ball_vx = ball.vx;
+                    stored_ball_vy = -ball_bounce_attenuation * ball.vy;
+                    ball.vx = 0.0f;
+                    ball.vy = 0.0f;
+                    stored_ball_py = ball.py;
+                    hit_brick = brick;
                 }
             }
             {
@@ -551,19 +548,6 @@ float quintic_root(float x) {
 
 float identity(float x) {
     return x;
-}
-
-// Jump function, describes jumping velocity over time over the domain of
-// [0, 1] where 1 is the top of the jump
-float jump_velocity(float x) {
-    return -2.0f * (x - 1.0f);
-}
-
-// Fall function, describes falling velocity over time over the domain of
-// [0, 1] where 1 is the point at which the ground would be reached if falling
-// from maximum jump height
-float fall_velocity(float x) {
-    return 3.0f * pow(x, 2.0f);
 }
 
 // Return a value larger than or equal to velocity (positive values only)
