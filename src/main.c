@@ -9,7 +9,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
+#include <sys/time.h>
 
 const char *window_title = "Nokia 3310 Jam #3";
 const uint32_t scale = 10;
@@ -34,7 +34,7 @@ const float ball_light_bounce_vx = 8.0f * scale;            // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
 const float player_jump_velocity = 50.0f * scale;           // pixels/s
-const float player_max_jump_height = 8.0f * player_height;  // pixels
+const float player_max_jump_height = 10.0f * player_height;  // pixels
 
 const float ball_bounce_attenuation = 0.95f;
 const float jump_release_attenuation = 0.9f;
@@ -157,18 +157,20 @@ int main(int argc, char** argv) {
 
 init:;    
 
-    srand(time(NULL));
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    srand((uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000);
     float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
     float start_y = 12.8f * scale;
 
     body_t ball = {
         .px = start_x,
-        .py = start_y + 25.6f * scale,
+        .py = start_y + player_height * 6.0f,
     };
 
     body_t player = {
-        .px = start_x - player_width / 2,
-        .py = start_y + 12.8f * scale,
+        .px = start_x - player_width * 0.5f,
+        .py = start_y + player_height * 2.0f,
     };
 
     brick_t bricks[max_num_bricks];
@@ -180,7 +182,50 @@ init:;
 
     float last_x = start_x;
     float last_y = start_y;
-    for (int i = 3; i < 255; i += 3) {
+
+    {
+        int i = 3;
+        float x = rand_range(start_x + 3.0f * brick_width, start_x + 6.0f * brick_width);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    {
+        int i = 6;
+        float x = rand_range(start_x - 9.0f * brick_width, start_x - 6.0f * brick_width);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    {
+        int i = 9;
+        float x = rand_range(start_x + 6.0f * brick_width, start_x + 9.0f * brick_width);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    for (int i = 12; i < 255; i += 3) {
         float x = rand_range(0.0f, 1.0f) > 0.5f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 9.0f * brick_width, last_x - 6.0f * brick_width);
         float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
