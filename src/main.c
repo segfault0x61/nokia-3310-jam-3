@@ -1,6 +1,7 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_mixer.h>
 
 #include <assert.h>
 #include <math.h>
@@ -32,7 +33,7 @@ const float ball_bounce_vy = 64.0f * scale;                 // pixels/s
 const float ball_light_bounce_vx = 8.0f * scale;            // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
-const float player_jump_velocity = 44.0f * scale;           // pixels/s
+const float player_jump_velocity = 50.0f * scale;           // pixels/s
 const float player_max_jump_height = 8.0f * player_height;  // pixels
 
 const float ball_bounce_attenuation = 0.95f;
@@ -76,13 +77,19 @@ float rand_range(float, float);
 float positive_fmod(float, float);
 
 int main(int argc, char** argv) {
-    if (SDL_Init(SDL_INIT_VIDEO)) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         return EXIT_FAILURE;
     }
 
     if (TTF_Init()) {
         return EXIT_FAILURE;
     }
+
+    if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048)) {
+        return EXIT_FAILURE;
+    }
+
+    Mix_Volume(-1, MIX_MAX_VOLUME / 4);
 
     SDL_Window *win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, 0);
     if (win == NULL) {
@@ -135,14 +142,18 @@ int main(int argc, char** argv) {
     loading_surf = TTF_RenderText_Shaded(font, game_over_text, text_color, bg_color);
     SDL_Texture *game_over_text_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
-    int high_score = 0;
+    Mix_Chunk *sfx_jump = Mix_LoadWAV("res/jump.wav");
+    assert(sfx_jump != NULL);
+    Mix_Chunk *sfx_game_over = Mix_LoadWAV("res/game_over.wav");
+    assert(sfx_game_over != NULL);
+    Mix_Chunk *sfx_bounce_start = Mix_LoadWAV("res/bounce_start.wav");
+    assert(sfx_bounce_start != NULL);
+    Mix_Chunk *sfx_bounce_end = Mix_LoadWAV("res/bounce_end.wav");
+    assert(sfx_bounce_end != NULL);
+    Mix_Chunk *sfx_brick_break = Mix_LoadWAV("res/hit.wav");
+    assert(sfx_brick_break != NULL);
 
-    // SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };
-    // SDL_Texture *number_textures[10];
-    // for (int i = 0; i < 10; i++) {
-    //     loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
-    //     number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
-    // }
+    int high_score = 0;
 
 init:;    
 
@@ -326,10 +337,11 @@ init:;
         // Initiate jump if possible
         if (time_since_jump_press < time_to_buffer_jump) {
             // Jump has just been pressed or is buffered
-            if (player_on_ground || air_time < coyote_time) {
+            if (!player_jumping && (player_on_ground || air_time < coyote_time)) {
                 // Player is able to jump
                 player.vy = player_jump_velocity;
                 player_jumping = true;
+                Mix_PlayChannel(-1, sfx_jump, 0);
             }
         }
         if (jump_time > time_to_max_jump) {
@@ -370,6 +382,7 @@ init:;
                 left_pressed_entering_carry_state = false;
                 player_carrying_ball = false;
                 ball_carry_time = 0;
+                Mix_PlayChannel(-1, sfx_bounce_end, 0);
             }
         }
         if (ball_bouncing) {
@@ -386,6 +399,7 @@ init:;
                 hit_brick->x = 0;
                 hit_brick->y = 0;
                 hit_brick = NULL;
+                Mix_PlayChannel(-1, sfx_brick_break, 0);
                 score++;
                 if (score > high_score) {
                     high_score = score;
@@ -396,6 +410,7 @@ init:;
         // Check if ball falls off the bottom of screen
         if (ball.py + ball_radius < camera_y) {
             game_over = true;
+            Mix_PlayChannel(-1, sfx_game_over, 0);
         }
 
         // Check for collision between ball and player
@@ -411,6 +426,7 @@ init:;
                 left_pressed_entering_carry_state = left_pressed;
                 right_pressed_entering_carry_state = right_pressed;
                 player_carrying_ball = true;
+                Mix_PlayChannel(-1, sfx_bounce_start, 0);
             }
         }
 
@@ -437,6 +453,7 @@ init:;
                     ball.vy = 0.0f;
                     stored_ball_py = ball.py;
                     hit_brick = brick;
+                    Mix_PlayChannel(-1, sfx_bounce_start, 0);
                 }
             }
             {
@@ -564,11 +581,23 @@ init:;
         SDL_RenderPresent(renderer);
     }
 
+    Mix_FreeChunk(sfx_jump);
+    Mix_FreeChunk(sfx_game_over);
+    Mix_FreeChunk(sfx_bounce_start);
+    Mix_FreeChunk(sfx_bounce_end);
+    Mix_FreeChunk(sfx_brick_break);
+    Mix_CloseAudio();
+    Mix_Quit();
+
+    IMG_Quit();
+
+    TTF_CloseFont(font);
+    TTF_Quit();
+
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(win);
 
     SDL_Quit();
-    TTF_Quit();
 
     return 0;
 }
