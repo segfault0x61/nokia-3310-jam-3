@@ -17,11 +17,11 @@ const uint32_t step_size = 16; // 8 ms is approx. 120Hz, 16 ms approx. 60hz... e
 const float steps_per_second = (float)(step_size)*0.001f;
 const SDL_Color bg_color = { 0xC7, 0xF0, 0xD8, 0xFF };
 
-const float ball_radius = 1.0f * scale;  // pixels
-const float player_width = 2.f * scale;  // pixels
-const float player_height = 2.f * scale; // pixels
+const float ball_radius = 1.6f * scale;  // pixels
+const float player_width = 3.2f * scale;  // pixels
+const float player_height = 3.2f * scale; // pixels
 const float brick_width = 6.4f * scale;  // pxiels
-const float brick_height = 1.6f * scale; // pixels
+const float brick_height = 3.2f * scale; // pixels
 
 const float gravity = 80.0f * scale; // pixels/s/s
 const float fast_gravity = 240.0f * scale; // pixels/s/s
@@ -32,7 +32,7 @@ const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
 const float player_max_jump_height = 8.0f * player_height;  // pixels
 
-const float ball_bounce_attenuation = 1.0f;
+const float ball_bounce_attenuation = 0.95f;
 const float jump_release_attenuation = 0.9f;
 
 const float ball_no_bounce_velocity = 12.0f * scale; // pixels/s
@@ -88,6 +88,8 @@ int main(int argc, char** argv) {
         return EXIT_FAILURE;
     }
 
+    SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+
     SDL_Surface *loading_surf;
 
     loading_surf = IMG_Load("res/ball.png");
@@ -117,24 +119,10 @@ int main(int argc, char** argv) {
 
     brick_t bricks[max_num_bricks];
     memset(bricks, 0, max_num_bricks * sizeof(brick_t));
-    // bricks[0].x = start_x - 6.4f * scale;
-    // bricks[0].y = start_y + 6.4f * scale;
-    // bricks[1].x = start_x;
-    // bricks[1].y = start_y + 6.4f * scale;
-    
-    bricks[0].x = start_x - brick_width / 2.0f;
-    bricks[0].y = start_y;
-    bricks[1].x = start_x - brick_width * 3.0f / 2.0f;
-    bricks[1].y = start_y;
-    bricks[2].x = start_x + brick_width / 2.0f;
-    bricks[2].y = start_y;
-
-    bricks[3].x = start_x - brick_width / 2.0f + 12.8f * scale;
-    bricks[3].y = start_y + 12.8f * scale;
-    bricks[4].x = start_x - brick_width * 3.0f / 2.0f + 12.8f * scale;
-    bricks[4].y = start_y + 12.8f * scale;
-    bricks[5].x = start_x + brick_width / 2.0f + 12.8f * scale;
-    bricks[5].y = start_y + 12.8f * scale;
+    bricks[0].x = start_x - 6.4f * scale;
+    bricks[0].y = start_y + 6.4f * scale;
+    bricks[1].x = start_x;
+    bricks[1].y = start_y + 6.4f * scale;
 
     uint32_t last_step_ticks = 0;
     float last_ball_px = 0.0f;
@@ -269,13 +257,17 @@ int main(int argc, char** argv) {
                 player_jumping = true;
             }
         }
-        if (jump_time > time_to_max_jump) {
-            // Max jump has been reached
+        if (time_since_jump_press >= time_since_jump_release || jump_time > time_to_max_jump) {
+            // Either jump button was released or max jump has already been reached.
             player_jumping = false;
         }
         if (player_jumping) {
             player.vy = player_max_jump_height * jump_velocity((float)jump_time / time_to_max_jump);
         } else {
+            if (player.vy > 10.0f) {
+                // Attenuate vertical velocity when, say, jump button was released.
+                player.vy *= jump_release_attenuation;
+            }
             if (down_pressed) {
                 player.vy = fmax(-player_terminal_velocity, player.vy - steps_per_second * fast_gravity);
             } else {
@@ -428,7 +420,6 @@ int main(int argc, char** argv) {
         }
 
         // Render
-        SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
         SDL_RenderClear(renderer);
         for (int i = 0; i < max_num_bricks; i++) {
             brick_t *brick = &bricks[i];
