@@ -28,9 +28,9 @@ const float ball_bounce_vx = 20.0f * scale;                 // pixels/s
 const float ball_bounce_vy = 60.0f * scale;                 // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
-const float player_max_jump_height = 6.0f * player_height;  // pixels
+const float player_max_jump_height = 8.0f * player_height;  // pixels
 
-const float ball_bounce_attenuation = 0.7f;
+const float ball_bounce_attenuation = 1.0f;
 const float jump_release_attenuation = 0.9f;
 
 const float ball_no_bounce_velocity = 12.0f * scale; // pixels/s
@@ -253,26 +253,26 @@ int main(int argc, char** argv) {
                 player.vx = -decelerate(-player.vx);
             }
         }
+        // Try to jump
         if (time_since_jump_press < time_to_buffer_jump) {
-            // Jump is buffered
+            // Jump has just been pressed/triggered
             if (player_on_ground || air_time < coyote_time) {
                 // Player is able to jump
-                player.vy = player_max_jump_height * jump_velocity((float)jump_time / time_to_max_jump);
+                player.vy = player_max_jump_height * jump_velocity(0.0f);
                 player_jumping = true;
             }
         }
-        if (time_since_jump_press < time_since_jump_release) {
-            // Jump is held
-        } else {
-            // Jump is not held
+        if (time_since_jump_press >= time_since_jump_release || jump_time > time_to_max_jump) {
+            // Either jump button was released or max jump has already been reached.
             player_jumping = false;
         }
-        if (jump_time > time_to_max_jump) {
-            player_jumping = false;
-        }
-        if (!player_jumping && player.vy > 200.0f) {
-            player.vy *= jump_release_attenuation;
+        if (player_jumping) {
+            player.vy = player_max_jump_height * jump_velocity((float)jump_time / time_to_max_jump);
         } else {
+            if (player.vy > 10.0f) {
+                // Attenuate vertical velocity when, say, jump button was released.
+                player.vy *= jump_release_attenuation;
+            }
             if (down_pressed) {
                 player.vy = fmax(-player_terminal_velocity, player.vy - steps_per_second * fast_gravity);
             } else {
@@ -334,7 +334,7 @@ int main(int argc, char** argv) {
                     check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
                                                 positive_fmod(platform->x, (float)screen_width), platform->y, platform->w, platform->h) ||
                     check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                                positive_fmod(platform->x, (float)screen_width), platform->y, platform->w, platform->h);
+                                                positive_fmod(platform->x, (float)screen_width) - screen_width, platform->y, platform->w, platform->h);
                 if (collision && last_ball_py - ball_radius + 0.001f > platform->y + platform->h && ball.vy < 0) {
                     ball.py = platform->y + platform->h + ball_radius;
                     if (ball.vy > -ball_no_bounce_velocity) {
@@ -356,7 +356,7 @@ int main(int argc, char** argv) {
                     check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
                                               positive_fmod(platform->x, (float)screen_width) - screen_width, platform->y, platform->w, platform->h);
                 if (collision && last_player_py + 0.001f > platform->y + platform->h && player.vy < 0) {
-                    camera_focus_y = platform->y;
+                    camera_focus_y = fmax(camera_focus_y, platform->y);
                     player_platform = platform;
                     player.py = platform->y + platform->h;
                     player.vy = 0.0f;
@@ -536,7 +536,7 @@ float identity(float x) {
 // Jump function, describes jumping velocity over time over the domain of
 // [0, 1] where 1 is the top of the jump
 float jump_velocity(float x) {
-    return 3.0f * pow(x - 1.0f, 2.0f);
+    return -2.0f * (x - 1.0f);
 }
 
 // Fall function, describes falling velocity over time over the domain of
