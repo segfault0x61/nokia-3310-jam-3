@@ -21,19 +21,24 @@ const float player_width = 2.f * scale;  // pixels
 const float player_height = 2.f * scale; // pixels
 
 const float gravity = 80.0f * scale; // pixels/s/s
+const float fast_gravity = 240.0f * scale; // pixels/s/s
 
-const float ball_bounce_vx = 20.0f * scale;       // pixels/s
-const float ball_bounce_vy = 60.0f * scale;       // pixels/s
-const float player_max_velocity = 30.0f * scale;  // pixels/s
-const float player_jump_velocity = 40.0f * scale; // pixels/s
+const float ball_bounce_vx = 20.0f * scale;           // pixels/s
+const float ball_bounce_vy = 60.0f * scale;           // pixels/s
+const float player_max_velocity = 30.0f * scale;      // pixels/s
+const float player_terminal_velocity = 60.0f * scale; // pixels/s
+const float player_max_jump_height = 5.0f * player_height;
 
-const uint32_t coyote_time = 8; // steps
+const uint32_t coyote_time = 8;         // steps
+const uint32_t time_to_buffer_jump = 8; // steps
+const uint32_t max_time = 65535;        // steps
 
-const float time_to_max_velocity = 1.8f * scale;  // steps
-const float time_to_zero_velocity = 1.8f * scale; // steps
-const float time_to_pivot = 1.2f * scale;         // steps
-const float time_to_squash = 1.2f * scale;        // steps
-const float time_to_max_jump = 3.2f * scale;      // steps
+const float time_to_max_velocity = 1.8f * scale;       // steps
+const float time_to_zero_velocity = 1.8f * scale;      // steps
+const float time_to_pivot = 1.2f * scale;              // steps
+const float time_to_squash = 1.2f * scale;             // steps
+const float time_to_max_jump = 6.4f * scale;           // steps
+const float time_to_fall_from_max_jump = 3.2f * scale; // steps
 
 const uint32_t max_num_platforms = 32;
 
@@ -48,7 +53,8 @@ typedef struct {
 bool check_collision_circle_rect(float, float, float, float, float, float, float);
 bool check_collision_rect_rect(float, float, float, float, float, float, float, float);
 
-float hold_jump(float);
+float jump_velocity(float);
+float fall_velocity(float);
 float accelerate(float);
 float decelerate(float);
 float pivot(float);
@@ -138,7 +144,7 @@ int main(int argc, char** argv) {
 
     bool left_pressed = false;
     bool right_pressed = false;
-    bool jump_pressed = false;
+    bool down_pressed = false;
     bool player_on_ground = false;
     bool player_carrying_ball = false;
     bool player_jumping = false;
@@ -146,6 +152,9 @@ int main(int argc, char** argv) {
     float player_carry_offset = 0.0f;
     uint32_t ball_carry_time = 0;
     uint32_t air_time = 0;
+    uint32_t jump_time = 0;
+    uint32_t time_since_jump_press = max_time;
+    uint32_t time_since_jump_release = max_time - 1;
 
     platform_t *player_platform = NULL;
 
@@ -155,16 +164,25 @@ int main(int argc, char** argv) {
             if (e.type == SDL_QUIT) {
                 break;
             }
+            // Ignore key repeats
+            if (e.key.repeat) {
+                goto after_handle_input;
+            }
             if (e.type == SDL_KEYDOWN) {
                 switch (e.key.keysym.sym) {
                 case SDLK_LEFT:
+                case SDLK_a:
                     left_pressed = true;
                     break;
                 case SDLK_RIGHT:
+                case SDLK_d:
                     right_pressed = true;
                     break;
+                case SDLK_DOWN:
+                case SDLK_s:
+                    down_pressed = true;                    
                 case SDLK_SPACE:
-                    jump_pressed = true;
+                    time_since_jump_press = 0;
                     break;
                 default:
                     break;
@@ -173,19 +191,26 @@ int main(int argc, char** argv) {
             if (e.type == SDL_KEYUP) {
                 switch (e.key.keysym.sym) {
                 case SDLK_LEFT:
+                case SDLK_a:
                     left_pressed = false;
                     break;
                 case SDLK_RIGHT:
+                case SDLK_d:
                     right_pressed = false;
                     break;
+                case SDLK_DOWN:
+                case SDLK_s:
+                    down_pressed = false;
+                    break;
                 case SDLK_SPACE:
-                    jump_pressed = false;
+                    time_since_jump_release = 0;
                     break;
                 default:
                     break;
                 }
             }
         }
+    after_handle_input:;
 
         uint32_t ticks = SDL_GetTicks();
         if (ticks - last_step_ticks < step_size) {
@@ -224,16 +249,33 @@ int main(int argc, char** argv) {
                 player.vx = -decelerate(-player.vx);
             }
         }
-        if (jump_pressed) {
+        if (time_since_jump_press < time_to_buffer_jump) {
+            // Jump is buffered
             if (player_on_ground || air_time < coyote_time) {
-                player_on_ground = false;
+                // Player is able to jump
+                player.vy = -player_max_jump_height * jump_velocity((float)jump_time / time_to_max_jump);
                 player_jumping = true;
             }
-            if (air_time < time_to_max_jump) {
-                player.vy = -hold_jump(-player.vy);
+        }
+        if (time_since_jump_press < time_since_jump_release) {
+            // Jump is held
+        } else {
+            // Jump is not held
+            player_jumping = false;
+        }
+        if (jump_time > time_to_max_jump) {
+            player_jumping = false;
+        }
+        if (!player_jumping && player.vy < -100.0f) {
+            player.vy *= 0.80f;
+        } else {
+            if (down_pressed) {
+                player.vy = fmin(player_terminal_velocity, player.vy + steps_per_second * fast_gravity);
+            } else {
+                player.vy = fmin(player_terminal_velocity, player.vy + steps_per_second * gravity);
             }
         }
-        player.vy += steps_per_second * gravity;
+
         player.px += steps_per_second * player.vx;
         player.py += steps_per_second * player.vy;
 
@@ -295,8 +337,19 @@ int main(int argc, char** argv) {
         // Increment air time counter
         if (!player_on_ground) {
             air_time++;
+            if (player_jumping) {
+                jump_time++;
+            }
         } else {
             air_time = 0;
+            jump_time = 0;
+        }
+
+        if (time_since_jump_press < max_time) {
+            time_since_jump_press++;
+        }
+        if (time_since_jump_release < max_time - 1) {
+            time_since_jump_release++;
         }
 
         // Render
@@ -328,7 +381,7 @@ int main(int argc, char** argv) {
         }
         {
             SDL_Rect dst_rect = {.x = (int)player.px, .y = (int)player.py, .w = (int)player_width, .h = (int)player_height};
-            if (player_jumping && jump_pressed && air_time < time_to_max_jump) {
+            if (player_jumping) {
                 SDL_RenderCopy(renderer, player_jumping_texture, NULL, &dst_rect);
             } else {
                 SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
@@ -414,9 +467,17 @@ float identity(float x) {
     return x;
 }
 
-// Return a value larger than or equal to velocity (positive values only)
-float hold_jump(float velocity) {
-    return fmin(player_jump_velocity, player_jump_velocity * quintic_root(quintic(velocity / player_jump_velocity) + 1.0f / time_to_max_jump));
+// Jump function, describes jumping velocity over time over the domain of
+// [0, 1] where 1 is the top of the jump
+float jump_velocity(float x) {
+    return 3.0f * pow(x - 1.0f, 2.0f);
+}
+
+// Fall function, describes falling velocity over time over the domain of
+// [0, 1] where 1 is the point at which the ground would be reached if falling
+// from maximum jump height
+float fall_velocity(float x) {
+    return 3.0f * pow(x, 2.0f);
 }
 
 // Return a value larger than or equal to velocity (positive values only)
