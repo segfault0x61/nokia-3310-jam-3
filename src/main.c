@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 const char *window_title = "Nokia 3310 Jam #3";
 const uint32_t scale = 10;
@@ -27,13 +28,14 @@ const float ball_bounce_vx = 20.0f * scale;                 // pixels/s
 const float ball_bounce_vy = 60.0f * scale;                 // pixels/s
 const float player_max_velocity = 30.0f * scale;            // pixels/s
 const float player_terminal_velocity = 60.0f * scale;       // pixels/s
-const float player_max_jump_height = 5.0f * player_height;  // pixels
+const float player_max_jump_height = 6.0f * player_height;  // pixels
 
 const float ball_bounce_attenuation = 0.7f;
+const float jump_release_attenuation = 0.9f;
 
 const float ball_no_bounce_velocity = 12.0f * scale; // pixels/s
 
-const uint32_t coyote_time = 8;         // steps
+const uint32_t coyote_time = 12;        // steps
 const uint32_t time_to_buffer_jump = 8; // steps
 const uint32_t max_time = 65535;        // steps
 
@@ -42,7 +44,6 @@ const float time_to_zero_velocity = 1.8f * scale;      // steps
 const float time_to_pivot = 1.2f * scale;              // steps
 const float time_to_squash = 1.2f * scale;             // steps
 const float time_to_max_jump = 6.4f * scale;           // steps
-const float time_to_fall_from_max_jump = 3.2f * scale; // steps
 
 const uint32_t max_num_platforms = 32;
 
@@ -62,6 +63,8 @@ float fall_velocity(float);
 float accelerate(float);
 float decelerate(float);
 float pivot(float);
+
+float rand_range(float, float);
 
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO)) {
@@ -94,51 +97,66 @@ int main(int argc, char** argv) {
     loading_surf = IMG_Load("res/player_platform.png");
     SDL_Texture *player_platform_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
+    srand(time(NULL));
+    float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
+    float start_y = 12.8f * scale;
+
     body_t ball = {
-        .px = 28.0f * scale + ball_radius,
-        .py = 20.0f  * scale,
-        .vx = 0.0f,
-        .vy = -30.0f * scale,
+        .px = start_x,
+        .py = start_y + 25.6f * scale,
     };
 
     body_t player = {
-        .px = 28.0f * scale,
-        .py = 35.0f * scale,
-        .vx = 0.0f,
-        .vy = 0.0f,
+        .px = start_x - player_width / 2,
+        .py = start_y + 12.8f * scale,
     };
 
     platform_t platforms[max_num_platforms];
     memset(platforms, 0, max_num_platforms * sizeof(platform_t));
-    platforms[0].x = 25.0f * scale;
-    platforms[0].y = 5.0f * scale;
+    platforms[0].x = start_x - 6.4f * scale;
+    platforms[0].y = start_y;
     platforms[0].h = 2.0f * scale;
     platforms[0].w = 10.0f * scale;
 
-    platforms[1].x = 40.0f * scale;
-    platforms[1].y = 45.0f * scale - 1.0f * player_height;
-    platforms[1].h = 2.0f * scale;
-    platforms[1].w = 10.0f * scale;
+    // platforms[1].x = 40.0f * scale;
+    // platforms[1].y = 45.0f * scale - 1.0f * player_height;
+    // platforms[1].h = 2.0f * scale;
+    // platforms[1].w = 10.0f * scale;
 
-    platforms[2].x = 40.0f * scale;
-    platforms[2].y = 45.0f * scale - 3.0f * player_height;
-    platforms[2].h = 2.0f * scale;
-    platforms[2].w = 10.0f * scale;
+    // platforms[2].x = 40.0f * scale;
+    // platforms[2].y = 45.0f * scale - 3.0f * player_height;
+    // platforms[2].h = 2.0f * scale;
+    // platforms[2].w = 10.0f * scale;
 
-    platforms[3].x = 40.0f * scale;
-    platforms[3].y = 45.0f * scale - 5.0f * player_height;
-    platforms[3].h = 2.0f * scale;
-    platforms[3].w = 10.0f * scale;
+    // platforms[3].x = 40.0f * scale;
+    // platforms[3].y = 45.0f * scale - 5.0f * player_height;
+    // platforms[3].h = 2.0f * scale;
+    // platforms[3].w = 10.0f * scale;
 
-    platforms[4].x = 40.0f * scale;
-    platforms[4].y = 45.0f * scale - 7.0f * player_height;
-    platforms[4].h = 2.0f * scale;
-    platforms[4].w = 10.0f * scale;
+    // platforms[4].x = 40.0f * scale;
+    // platforms[4].y = 45.0f * scale - 7.0f * player_height;
+    // platforms[4].h = 2.0f * scale;
+    // platforms[4].w = 10.0f * scale;
 
-    platforms[5].x = 40.0f * scale;
-    platforms[5].y = 45.0f * scale - 9.0f * player_height;
-    platforms[5].h = 2.0f * scale;
-    platforms[5].w = 10.0f * scale;
+    // platforms[5].x = 40.0f * scale;
+    // platforms[5].y = 45.0f * scale - 9.0f * player_height;
+    // platforms[5].h = 2.0f * scale;
+    // platforms[5].w = 10.0f * scale;
+
+    const int loaded_platform_levels = 4;
+    int j = 1;
+    for (int i = 0; i < loaded_platform_levels; i++) {
+        j++;
+        platforms[j].x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
+        platforms[j].y = start_y + j * player_height;
+        platforms[j].w = 10.0f * scale;
+        platforms[j].h = 2.0f * scale;
+        j++;
+        platforms[j].x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
+        platforms[j].y = start_y + j * player_height;
+        platforms[j].w = 10.0f * scale;
+        platforms[j].h = 2.0f * scale;
+    }
 
     uint32_t last_step_ticks = 0;
     float last_ball_px = 0.0f;
@@ -275,8 +293,8 @@ int main(int argc, char** argv) {
         if (jump_time > time_to_max_jump) {
             player_jumping = false;
         }
-        if (!player_jumping && player.vy > 100.0f) {
-            player.vy *= 0.80f;
+        if (!player_jumping && player.vy > 200.0f) {
+            player.vy *= jump_release_attenuation;
         } else {
             if (down_pressed) {
                 player.vy = fmax(-player_terminal_velocity, player.vy - steps_per_second * fast_gravity);
@@ -532,4 +550,9 @@ float decelerate(float velocity) {
 // Return a value less than velocity that approaches zero (positive values only)
 float pivot(float velocity) {
     return fmax(0.0f, velocity - player_max_velocity / time_to_pivot);
+}
+
+float rand_range(float min, float max) {
+    float r = (float)rand() / (float)RAND_MAX;
+    return min + r * (max - min);
 }
