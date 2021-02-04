@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-const char *window_title = "Nokia 3310 Jam #3";
+const char *window_title = "Break Up";
 const uint32_t scale = 10;
 const uint32_t screen_width = 84 * scale;
 const uint32_t screen_height = 48 * scale;
@@ -95,6 +95,10 @@ int main(int argc, char** argv) {
     if (win == NULL) {
         return EXIT_FAILURE;
     }
+
+    SDL_Surface *icon = IMG_Load("res/icon.png");
+    SDL_SetWindowIcon(win, icon);
+    SDL_FreeSurface(icon);
 
     SDL_Renderer *renderer =
         SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
