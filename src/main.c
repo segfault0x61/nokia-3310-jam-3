@@ -746,7 +746,7 @@ int main(int argc, char** argv) {
     init();
 
 #ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(one_iter, 0, 1);
+    emscripten_set_main_loop(one_iter, 60, 1);
 #else
     while (!should_quit) {
         one_iter();
