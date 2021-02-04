@@ -148,11 +148,12 @@ void init() {
     gettimeofday(&tv, NULL);
     srand((uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000);
     // float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
-    float start_x = 42.0f * scale;
+    // float start_x = 42.0f * scale;
+    float start_x = -0.5f * scale;
     float start_y = 6.4f * scale;
 
     ball = (body_t){
-        .px = start_x,
+        .px = start_x + ball_radius - 5.0f,
         .py = start_y + player_height * 6.0f,
         .vy = 40.0f * scale,
     };
@@ -171,8 +172,8 @@ void init() {
     bricks[2].x = start_x + brick_width / 2.0f;
     bricks[2].y = start_y;
 
-    bricks[3].x = start_x - brick_width / 2.0f;
-    bricks[3].y = start_y + 4.0f * player_height;
+    // bricks[3].x = start_x - brick_width / 2.0f;
+    // bricks[3].y = start_y + 4.0f * player_height;
 
     // bricks[0].x = start_x - 6.0f * scale;
     // bricks[0].y = start_y + 6.0f * scale;
@@ -435,7 +436,7 @@ void one_iter() {
             check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
                                         positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height) ||
             check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                        positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height);
+                                        positive_fmod(player.px, (float)screen_width) - screen_width, player.py, player_width, player_height);
         if (collision && last_ball_py > player.py + player_height && ball.vy <= 0.0f) {
             // Enter carry state
             player_carry_offset = ball.px - player.px;
@@ -634,7 +635,6 @@ int main(int argc, char** argv) {
     SDL_Surface *icon = IMG_Load("res/icon.png");
     SDL_SetWindowIcon(win, icon);
     SDL_FreeSurface(icon);
-
 
     renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (renderer == NULL) {
