@@ -147,15 +147,12 @@ bool should_quit = false;
 void init() {
     gettimeofday(&tv, NULL);
     srand((uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000);
-    // float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
-    // float start_x = 42.0f * scale;
-    float start_x = -0.5f * scale;
+    float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
     float start_y = 6.4f * scale;
 
     ball = (body_t){
-        .px = start_x + ball_radius - 5.0f,
+        .px = start_x,
         .py = start_y + player_height * 6.0f,
-        .vy = 40.0f * scale,
     };
 
     player = (body_t){
@@ -172,15 +169,11 @@ void init() {
     bricks[2].x = start_x + brick_width / 2.0f;
     bricks[2].y = start_y;
 
-    // bricks[3].x = start_x - brick_width / 2.0f;
-    // bricks[3].y = start_y + 4.0f * player_height;
-
     // bricks[0].x = start_x - 6.0f * scale;
     // bricks[0].y = start_y + 6.0f * scale;
     // bricks[1].x = start_x;
     // bricks[1].y = start_y + 6.0f * scale;
 
-/*
     float last_x = start_x;
     float last_y = start_y;
 
@@ -214,7 +207,7 @@ void init() {
 
     {
         int i = 9;
-        float x = rand_range(start_x + 6.0f * brick_width, start_x + 9.0f * brick_width);
+        float x = rand_range(start_x + 6.0f * brick_width, start_x + 8.0f * brick_width);
         float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
@@ -227,7 +220,9 @@ void init() {
     }
 
     for (int i = 12; i < 255; i += 3) {
-        float x = rand_range(0.0f, 1.0f) > 0.5f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 9.0f * brick_width, last_x - 6.0f * brick_width);
+        float x = rand_range(0.0f, 1.0f) > 0.5f 
+            ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) 
+            : rand_range(last_x - 8.0f * brick_width, last_x - 6.0f * brick_width);
         float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
@@ -237,8 +232,9 @@ void init() {
         bricks[i + 1].y = last_y;
         bricks[i + 2].x = last_x + brick_width / 2.0f;
         bricks[i + 2].y = last_y;
-    }    
-    */
+    }
+
+    
     next_brick = 0;
 
     last_step_ticks = 0;
@@ -466,6 +462,9 @@ void one_iter() {
     player_brick = NULL;
     for (int i = 0; i < MAX_NUM_BRICKS; i++) {
         brick_t *brick = &bricks[i];
+        if (brick->x == 0 && brick->y == 0) {
+            continue;
+        }        
         if (brick->y + brick_height < camera_y) {
             // Off-screen bricks don't have collision
             continue;
