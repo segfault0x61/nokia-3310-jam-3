@@ -1,3 +1,7 @@
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
@@ -15,14 +19,13 @@ const char *window_title = "Break Up";
 const uint32_t scale = 10;
 const uint32_t screen_width = 84 * scale;
 const uint32_t screen_height = 48 * scale;
-const uint32_t step_size = 16; // 8 ms is approx. 120Hz, 16 ms approx. 60hz... etc.
-const float steps_per_second = (float)(step_size)*0.001f;
+const float seconds_per_frame = 1.0f / 60.0f;
 const SDL_Color bg_color = { 0xC7, 0xF0, 0xD8, 0xFF };
 
 const float ball_radius = 2.5f * scale;   // pixels
 const float player_width = 7.0f * scale;  // pixels
 const float player_height = 6.0f * scale; // pixels
-const float brick_width = 6.0f * scale;   // pxiels
+const float brick_width = 6.0f * scale;   // pixels
 const float brick_height = 3.0f * scale;  // pixels
 
 const float gravity = 80.0f * scale; // pixels/s/s
@@ -41,20 +44,20 @@ const float jump_release_attenuation = 0.9f;
 
 const float ball_no_bounce_velocity = 12.0f * scale; // pixels/s
 
-const uint32_t coyote_time = 12;        // steps
+const uint32_t coyote_time = 6;         // steps
 const uint32_t time_to_buffer_jump = 8; // steps
 const uint32_t max_time = 65535;        // steps
 
-const float time_to_max_velocity = 1.8f * scale;       // steps
-const float time_to_zero_velocity = 1.8f * scale;      // steps
-const float time_to_pivot = 1.2f * scale;              // steps
-const float time_to_squash = 1.2f * scale;             // steps
-const float time_to_max_jump = 6.4f * scale;           // steps
+const float time_to_max_velocity = 0.9f * scale;       // steps
+const float time_to_zero_velocity = 0.9f * scale;      // steps
+const float time_to_pivot = 0.6f * scale;              // steps
+const float time_to_squash = 0.8f * scale;             // steps
+const float time_to_max_jump = 3.2f * scale;           // steps
 
 const float camera_focus_bottom_margin = 12.8f * scale;
 const float camera_move_factor = 0.04f;
 
-const uint32_t max_num_bricks = 256;
+#define MAX_NUM_BRICKS 256
 
 const char *game_over_text = " press R to restart ";
 
@@ -76,6 +79,514 @@ float pivot(float);
 float rand_range(float, float);
 float positive_fmod(float, float);
 
+int next_brick;
+
+uint32_t last_step_ticks;
+float last_ball_px;
+float last_ball_py;
+float last_player_px;
+float last_player_py;
+
+bool left_pressed;
+bool right_pressed;
+bool down_pressed;
+bool reset_pressed;
+bool jump_pressed;
+bool player_on_ground;
+bool player_carrying_ball;
+bool player_jumping;
+bool ball_bouncing;
+
+bool left_pressed_entering_carry_state;
+bool right_pressed_entering_carry_state;
+
+float player_carry_offset;
+float stored_ball_vx;
+float stored_ball_vy;
+float stored_ball_py;
+
+uint32_t ball_carry_time;
+uint32_t ball_bounce_time;
+uint32_t air_time;
+uint32_t jump_time;
+uint32_t time_since_jump_press;
+uint32_t time_since_jump_release;
+
+float camera_y;
+float camera_focus_y;
+
+brick_t *player_brick;
+brick_t *hit_brick;
+
+bool game_over;
+
+uint32_t high_score;
+uint32_t score;
+
+struct timeval tv;
+
+body_t ball, player;
+
+brick_t bricks[MAX_NUM_BRICKS];
+
+SDL_Window *win;
+SDL_Renderer *renderer;
+SDL_Surface *loading_surf;
+SDL_Texture *ball_texture, *ball_squash_texture, *player_texture, *player_jump_texture, *player_fall_texture, *brick_texture;
+SDL_Texture *white_number_textures[10];
+SDL_Texture *yellow_number_textures[10];
+SDL_Texture *game_over_text_texture;
+Mix_Chunk *sfx_jump, *sfx_game_over, *sfx_bounce_start, *sfx_bounce_end, *sfx_brick_break;
+TTF_Font *font;
+
+int glyph_width, glyph_height;
+int game_over_text_width, game_over_text_height;
+
+bool should_quit = false;
+
+void init() {
+    gettimeofday(&tv, NULL);
+    srand((uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000);
+    float start_x = rand_range(128.0f, screen_width - 128.0f);
+    float start_y = 128.0f;
+
+    ball = (body_t){
+        .px = start_x,
+        .py = start_y + player_height * 6.0f,
+    };
+
+    player = (body_t){
+        .px = start_x - player_width * 0.5f,
+        .py = start_y + player_height * 2.0f,
+    };
+
+    memset(bricks, 0, MAX_NUM_BRICKS * sizeof(brick_t));
+
+    bricks[0].x = start_x - brick_width / 2.0f;
+    bricks[0].y = start_y;
+    bricks[1].x = start_x - brick_width * 3.0f / 2.0f;
+    bricks[1].y = start_y;
+    bricks[2].x = start_x + brick_width / 2.0f;
+    bricks[2].y = start_y;
+
+    float last_x = start_x;
+    float last_y = start_y;
+
+    {
+        int i = 3;
+        float x = rand_range(start_x + 3.0f * brick_width, start_x + 6.0f * brick_width);
+        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    {
+        int i = 6;
+        float x = rand_range(start_x - 9.0f * brick_width, start_x - 6.0f * brick_width);
+        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    {
+        int i = 9;
+        float x = rand_range(start_x + 6.0f * brick_width, start_x + 9.0f * brick_width);
+        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    for (int i = 12; i < 255; i += 3) {
+        float x = rand_range(0.0f, 1.0f) > 0.5f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 9.0f * brick_width, last_x - 6.0f * brick_width);
+        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        last_x = x;
+        last_y = y;
+        bricks[i].x = last_x - brick_width / 2.0f;
+        bricks[i].y = last_y;
+        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
+        bricks[i + 1].y = last_y;
+        bricks[i + 2].x = last_x + brick_width / 2.0f;
+        bricks[i + 2].y = last_y;
+    }
+
+    next_brick = 0;
+
+    last_step_ticks = 0;
+    last_ball_px = 0.0f;
+    last_ball_py = 0.0f;
+    last_player_px = 0.0f;
+    last_player_py = 0.0f;
+
+    left_pressed = false;
+    right_pressed = false;
+    down_pressed = false;
+    player_on_ground = false;
+    player_carrying_ball = false;
+    player_jumping = false;
+    ball_bouncing = false;
+    left_pressed_entering_carry_state = false;
+    right_pressed_entering_carry_state = false;
+
+    player_carry_offset = 0.0f;
+    stored_ball_vx = 0.0f;
+    stored_ball_vy = 0.0f;
+    stored_ball_py = 0.0f;
+    ball_carry_time = 0;
+    ball_bounce_time = 0;
+    air_time = 0;
+    jump_time = 0;
+    time_since_jump_press = max_time;
+    time_since_jump_release = max_time - 1;
+
+    camera_y = 0.0f;
+    camera_focus_y = bricks[0].y;
+
+    player_brick = NULL;
+    hit_brick = NULL;
+
+    game_over = false;
+
+    score = 0;
+}
+
+void one_iter() {
+    SDL_Event e;
+    if (SDL_PollEvent(&e)) {
+        if (e.type == SDL_QUIT) {
+            should_quit = true;
+            return;
+        }
+    }
+    const Uint8 *keystates = SDL_GetKeyboardState(NULL);
+    left_pressed = keystates[SDL_SCANCODE_A] || keystates[SDL_SCANCODE_LEFT];
+    right_pressed = keystates[SDL_SCANCODE_D] || keystates[SDL_SCANCODE_RIGHT];
+    down_pressed = keystates[SDL_SCANCODE_S] || keystates[SDL_SCANCODE_DOWN];
+
+    if (!reset_pressed && keystates[SDL_SCANCODE_R]) {
+        reset_pressed = keystates[SDL_SCANCODE_R];
+        init();
+        return;
+    }
+
+    if (reset_pressed && !keystates[SDL_SCANCODE_R]) {
+        reset_pressed = keystates[SDL_SCANCODE_R];
+    }
+
+    if (!jump_pressed && keystates[SDL_SCANCODE_SPACE]) {
+        jump_pressed = keystates[SDL_SCANCODE_SPACE];
+        time_since_jump_press = 0;
+    }
+
+    if (jump_pressed && !keystates[SDL_SCANCODE_SPACE]) {
+        jump_pressed = keystates[SDL_SCANCODE_SPACE];
+        time_since_jump_release = 0;
+    }
+
+    if (game_over) {
+        return;
+    }
+
+    // Step ball
+    last_ball_px = ball.px;
+    last_ball_py = ball.py;
+    if (!ball_bouncing) {
+        ball.vy -= seconds_per_frame * gravity;
+    }
+    ball.px += seconds_per_frame * ball.vx;
+    ball.py += seconds_per_frame * ball.vy;
+
+    // Step player
+    last_player_px = player.px;
+    last_player_py = player.py;
+    if (left_pressed ^ right_pressed) {
+        if (left_pressed) {
+            if (player.vx > 0.0f) {
+                player.vx = pivot(player.vx);
+            } else {
+                player.vx = -accelerate(-player.vx);
+            }
+        } else {
+            if (player.vx < 0.0f) {
+                player.vx = -pivot(-player.vx);
+            } else {
+                player.vx = accelerate(player.vx);
+            }
+        }
+    } else {
+        if (player.vx > 0.0f) {
+            player.vx = decelerate(player.vx);
+        } else {
+            player.vx = -decelerate(-player.vx);
+        }
+    }
+    // Initiate jump if possible
+    if (time_since_jump_press < time_to_buffer_jump) {
+        // Jump has just been pressed or is buffered
+        if (!player_jumping && (player_on_ground || air_time < coyote_time)) {
+            // Player is able to jump
+            player.vy = player_jump_velocity;
+            player_jumping = true;
+            Mix_PlayChannel(-1, sfx_jump, 0);
+        }
+    }
+    if (jump_time > time_to_max_jump) {
+        // Max jump has been reached
+        player_jumping = false;
+    }
+    if (!player_jumping && down_pressed) {
+        player.vy -= seconds_per_frame * fast_gravity;
+    } else {
+        player.vy -= seconds_per_frame * gravity;
+    }
+
+    player.px += seconds_per_frame * player.vx;
+    player.py += seconds_per_frame * player.vy;
+
+    // Squash ball
+    if (player_carrying_ball) {
+        ball.py = player.py + player_height + ball_radius;
+        if (ball_carry_time < time_to_squash) {
+            ball.px = player.px + player_carry_offset;
+            ball_carry_time++;
+        } else {
+            ball.vy = ball_bounce_vy;
+            if (left_pressed ^ right_pressed) {
+                if (left_pressed) {
+                    if (left_pressed_entering_carry_state) {
+                        ball.vx = -ball_bounce_vx;
+                    } else {
+                        ball.vx = -ball_light_bounce_vx;
+                    }
+                } else if (right_pressed) {
+                    if (right_pressed_entering_carry_state) {
+                        ball.vx = ball_bounce_vx;
+                    } else {
+                        ball.vx = ball_light_bounce_vx;
+                    }
+                }
+            } else {
+                ball.vx = 0.0f;
+            }
+            right_pressed_entering_carry_state = false;
+            left_pressed_entering_carry_state = false;
+            player_carrying_ball = false;
+            ball_carry_time = 0;
+            Mix_PlayChannel(-1, sfx_bounce_end, 0);
+        }
+    }
+    if (ball_bouncing) {
+        if (ball_bounce_time < time_to_squash) {
+            ball_bounce_time++;
+        } else {
+            ball.vx = stored_ball_vx;
+            ball.vy = stored_ball_vy;
+            ball.py = stored_ball_py;
+            ball_bouncing = false;
+            ball_bounce_time = 0;
+
+            // Break brick
+            hit_brick->x = 0;
+            hit_brick->y = 0;
+            hit_brick = NULL;
+            Mix_PlayChannel(-1, sfx_brick_break, 0);
+            score++;
+            if (score > high_score) {
+                high_score = score;
+            }
+        }
+    }
+
+    // Check if ball falls off the bottom of screen
+    if (ball.py + ball_radius < camera_y) {
+        game_over = true;
+        Mix_PlayChannel(-1, sfx_game_over, 0);
+    }
+
+    // Check for collision between ball and player
+    if (!player_carrying_ball) {
+        bool collision =
+            check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                        positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height) ||
+            check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                        positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height);
+        if (collision && last_ball_py > player.py + player_height && ball.vy < 0) {
+            // Enter carry state
+            player_carry_offset = ball.px - player.px;
+            left_pressed_entering_carry_state = left_pressed;
+            right_pressed_entering_carry_state = right_pressed;
+            player_carrying_ball = true;
+            Mix_PlayChannel(-1, sfx_bounce_start, 0);
+        }
+    }
+
+    // Check for collision between ball and brick or player and brick
+    player_brick = NULL;
+    for (int i = 0; i < MAX_NUM_BRICKS; i++) {
+        brick_t *brick = &bricks[i];
+        if (brick->y + brick_height < camera_y) {
+            // Off-screen bricks don't have collision
+            continue;
+        }
+        {
+            bool collision =
+                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                            positive_fmod(brick->x, (float)screen_width), brick->y, brick_width, brick_height) ||
+                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
+                                            positive_fmod(brick->x, (float)screen_width) - screen_width, brick->y, brick_width, brick_height);
+            if (collision && last_ball_py - ball_radius + 0.001f > brick->y + brick_height && ball.vy < 0) {
+                ball.py = brick->y + brick_height + ball_radius;
+                ball_bouncing = true;
+                stored_ball_vx = ball.vx;
+                stored_ball_vy = -ball_bounce_attenuation * ball.vy;
+                ball.vx = 0.0f;
+                ball.vy = 0.0f;
+                stored_ball_py = ball.py;
+                hit_brick = brick;
+                Mix_PlayChannel(-1, sfx_bounce_start, 0);
+            }
+        }
+        {
+            bool collision =
+                check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
+                                          positive_fmod(brick->x, (float)screen_width), brick->y, brick_width, brick_height) ||
+                check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
+                                          positive_fmod(brick->x, (float)screen_width) - screen_width, brick->y, brick_width, brick_height);
+            if (collision && last_player_py + 0.001f > brick->y + brick_height && player.vy < 0) {
+                camera_focus_y = fmax(camera_focus_y, brick->y);
+                player_brick = brick;
+                player.py = brick->y + brick_height;
+                player.vy = 0.0f;
+                player_on_ground = true;
+                player_jumping = false;
+            }
+        }
+    }
+    if (player_brick == NULL) {
+        player_on_ground = false;
+    }
+
+    // Move camera
+    float camera_target_y = camera_focus_y - camera_focus_bottom_margin;
+    if (fabs(camera_y - camera_target_y) > 0.001f) {
+        camera_y = (1.0f - camera_move_factor) * camera_y + camera_move_factor * camera_target_y;
+    }
+
+    // Increment counters
+    if (!player_on_ground) {
+        air_time++;
+        if (player_jumping) {
+            jump_time++;
+        }
+    } else {
+        air_time = 0;
+        jump_time = 0;
+    }
+    if (time_since_jump_press < max_time) {
+        time_since_jump_press++;
+    }
+    if (time_since_jump_release < max_time - 1) {
+        time_since_jump_release++;
+    }
+
+    // Render
+    SDL_RenderClear(renderer);
+    if (!game_over) {
+        for (int i = 0; i < MAX_NUM_BRICKS; i++) {
+            brick_t *brick = &bricks[i];
+            if (brick->x == 0 && brick->y == 0) {
+                continue;
+            }
+            SDL_Rect dst_rect = {.x = (int)brick->x, .y = screen_height - (int)(brick->y + brick_height - camera_y), .w = (int)brick_width, .h = (int)brick_height};
+            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+            SDL_Rect wrap_rect = dst_rect;
+            wrap_rect.x -= screen_width;
+            SDL_RenderCopy(renderer, brick_texture, NULL, &dst_rect);
+            SDL_RenderCopy(renderer, brick_texture, NULL, &wrap_rect);
+        }
+        {
+            SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = screen_height - (int)(ball.py + ball_radius - camera_y), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
+            if (player_carrying_ball || ball_bouncing) {
+                const int ball_squash_width = 2.0f * ball_radius + 4.0f * 4.0f;
+                float x = ball.px - (float)ball_squash_width / 2.0f;
+                dst_rect.w = ball_squash_width;
+                dst_rect.x = x;
+            }
+            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+            SDL_Rect wrap_rect = dst_rect;
+            wrap_rect.x -= screen_width;
+            if (player_carrying_ball || ball_bouncing) {
+                SDL_RenderCopy(renderer, ball_squash_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, ball_squash_texture, NULL, &wrap_rect);
+            } else {
+                SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, ball_texture, NULL, &wrap_rect);
+            }
+        }
+        {
+            SDL_Rect dst_rect = {.x = (int)player.px, .y = screen_height - (int)(player.py + player_height - camera_y), .w = (int)player_width, .h = (int)player_height};
+            dst_rect.x = positive_fmod(dst_rect.x, screen_width);
+            SDL_Rect wrap_rect = dst_rect;
+            wrap_rect.x -= screen_width;
+            if (player_on_ground || air_time < coyote_time) {
+                SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
+                SDL_RenderCopy(renderer, player_texture, NULL, &wrap_rect);
+            } else {
+                if (player_jumping) {
+                    SDL_RenderCopy(renderer, player_jump_texture, NULL, &dst_rect);
+                    SDL_RenderCopy(renderer, player_jump_texture, NULL, &wrap_rect);
+                } else {
+                    SDL_RenderCopy(renderer, player_fall_texture, NULL, &dst_rect);
+                    SDL_RenderCopy(renderer, player_fall_texture, NULL, &wrap_rect);
+                }
+            }
+        }   
+        {
+            int digit = score;
+            int i = 0;
+            do {
+                SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - 2.0f * glyph_height, glyph_width, glyph_height};
+                SDL_RenderCopy(renderer, white_number_textures[digit % 10], NULL, &dst_rect);
+                digit /= 10;
+                i++;
+            } while (digit > 0);
+        }
+        {
+            int digit = high_score;
+            int i = 0;
+            do {
+                SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - glyph_height, glyph_width, glyph_height};
+                SDL_RenderCopy(renderer, yellow_number_textures[digit % 10], NULL, &dst_rect);
+                digit /= 10;
+                i++;
+            } while (digit > 0);
+        }
+    }
+    if (game_over) {
+        SDL_Rect dst_rect = {screen_width * 0.5f - game_over_text_width * 0.5f, screen_height * 0.5f - game_over_text_height * 0.5f, game_over_text_width, game_over_text_height};
+        SDL_RenderCopy(renderer, game_over_text_texture, NULL, &dst_rect);
+    }
+    
+    SDL_RenderPresent(renderer);
+}
+
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         return EXIT_FAILURE;
@@ -91,7 +602,7 @@ int main(int argc, char** argv) {
 
     Mix_Volume(-1, MIX_MAX_VOLUME / 4);
 
-    SDL_Window *win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, 0);
+    win = SDL_CreateWindow(window_title, 100, 100, screen_width, screen_height, 0);
     if (win == NULL) {
         return EXIT_FAILURE;
     }
@@ -100,40 +611,38 @@ int main(int argc, char** argv) {
     SDL_SetWindowIcon(win, icon);
     SDL_FreeSurface(icon);
 
-    SDL_Renderer *renderer =
-        SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+
+    renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
     if (renderer == NULL) {
         return EXIT_FAILURE;
     }
 
     SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
 
-    SDL_Surface *loading_surf;
-
     loading_surf = IMG_Load("res/ball.png");
-    SDL_Texture *ball_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
-
+    printf("%s\n", IMG_GetError());
+    assert(loading_surf != NULL);
+    ball_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    assert(ball_texture != NULL);
     loading_surf = IMG_Load("res/ball_squash.png");
-    SDL_Texture *ball_squash_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    ball_squash_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
     loading_surf = IMG_Load("res/player.png");
-    SDL_Texture *player_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    player_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
     loading_surf = IMG_Load("res/player_jumping.png");
-    SDL_Texture *player_jumping_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    player_jump_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
     loading_surf = IMG_Load("res/player_fall.png");
-    SDL_Texture *player_fall_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    player_fall_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
     loading_surf = IMG_Load("res/brick.png");
-    SDL_Texture *brick_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    brick_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    assert(brick_texture != NULL);
 
     TTF_Font *font = TTF_OpenFont("res/EffortsPro.ttf", 16.0f * scale);
     assert(font != NULL);
 
-    int glyph_width, glyph_height;
     TTF_SizeText(font, "a", &glyph_width, &glyph_height);
     SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };    
-    SDL_Texture *white_number_textures[10];
-    SDL_Texture *yellow_number_textures[10];
     for (int i = 0; i < 10; i++) {
         loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
         white_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
@@ -141,494 +650,31 @@ int main(int argc, char** argv) {
         yellow_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
     }
 
-    int game_over_text_width, game_over_text_height;
     TTF_SizeText(font, game_over_text, &game_over_text_width, &game_over_text_height);
     loading_surf = TTF_RenderText_Shaded(font, game_over_text, text_color, bg_color);
-    SDL_Texture *game_over_text_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+    game_over_text_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
-    Mix_Chunk *sfx_jump = Mix_LoadWAV("res/jump.wav");
+    sfx_jump = Mix_LoadWAV("res/jump.wav");
     assert(sfx_jump != NULL);
-    Mix_Chunk *sfx_game_over = Mix_LoadWAV("res/game_over.wav");
+    sfx_game_over = Mix_LoadWAV("res/game_over.wav");
     assert(sfx_game_over != NULL);
-    Mix_Chunk *sfx_bounce_start = Mix_LoadWAV("res/bounce_start.wav");
+    sfx_bounce_start = Mix_LoadWAV("res/bounce_start.wav");
     assert(sfx_bounce_start != NULL);
-    Mix_Chunk *sfx_bounce_end = Mix_LoadWAV("res/bounce_end.wav");
+    sfx_bounce_end = Mix_LoadWAV("res/bounce_end.wav");
     assert(sfx_bounce_end != NULL);
-    Mix_Chunk *sfx_brick_break = Mix_LoadWAV("res/hit.wav");
+    sfx_brick_break = Mix_LoadWAV("res/hit.wav");
     assert(sfx_brick_break != NULL);
 
-    int high_score = 0;
+    init();
 
-init:;    
-
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    srand((uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000);
-    float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
-    float start_y = 12.8f * scale;
-
-    body_t ball = {
-        .px = start_x,
-        .py = start_y + player_height * 6.0f,
-    };
-
-    body_t player = {
-        .px = start_x - player_width * 0.5f,
-        .py = start_y + player_height * 2.0f,
-    };
-
-    brick_t bricks[max_num_bricks];
-    memset(bricks, 0, max_num_bricks * sizeof(brick_t));
-    bricks[0].x = start_x - 6.0f * scale;
-    bricks[0].y = start_y + 6.0f * scale;
-    bricks[1].x = start_x;
-    bricks[1].y = start_y + 6.0f * scale;
-
-    float last_x = start_x;
-    float last_y = start_y;
-
-    {
-        int i = 3;
-        float x = rand_range(start_x + 3.0f * brick_width, start_x + 6.0f * brick_width);
-        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
-        last_x = x;
-        last_y = y;
-        bricks[i].x = last_x - brick_width / 2.0f;
-        bricks[i].y = last_y;
-        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
-        bricks[i + 1].y = last_y;
-        bricks[i + 2].x = last_x + brick_width / 2.0f;
-        bricks[i + 2].y = last_y;
+#ifdef __EMSCRIPTEN__
+    emscripten_set_main_loop(one_iter, 0, 1);
+#else
+    while (!should_quit) {
+        one_iter();
+        SDL_Delay(16);
     }
-
-    {
-        int i = 6;
-        float x = rand_range(start_x - 9.0f * brick_width, start_x - 6.0f * brick_width);
-        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
-        last_x = x;
-        last_y = y;
-        bricks[i].x = last_x - brick_width / 2.0f;
-        bricks[i].y = last_y;
-        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
-        bricks[i + 1].y = last_y;
-        bricks[i + 2].x = last_x + brick_width / 2.0f;
-        bricks[i + 2].y = last_y;
-    }
-
-    {
-        int i = 9;
-        float x = rand_range(start_x + 6.0f * brick_width, start_x + 9.0f * brick_width);
-        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
-        last_x = x;
-        last_y = y;
-        bricks[i].x = last_x - brick_width / 2.0f;
-        bricks[i].y = last_y;
-        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
-        bricks[i + 1].y = last_y;
-        bricks[i + 2].x = last_x + brick_width / 2.0f;
-        bricks[i + 2].y = last_y;
-    }
-
-    for (int i = 12; i < 255; i += 3) {
-        float x = rand_range(0.0f, 1.0f) > 0.5f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 9.0f * brick_width, last_x - 6.0f * brick_width);
-        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
-        last_x = x;
-        last_y = y;
-        bricks[i].x = last_x - brick_width / 2.0f;
-        bricks[i].y = last_y;
-        bricks[i + 1].x = last_x - brick_width * 3.0f / 2.0f;
-        bricks[i + 1].y = last_y;
-        bricks[i + 2].x = last_x + brick_width / 2.0f;
-        bricks[i + 2].y = last_y;
-    }
-
-    int next_brick = 0;
-
-    uint32_t last_step_ticks = 0;
-    float last_ball_px = 0.0f;
-    float last_ball_py = 0.0f;
-    float last_player_px = 0.0f;
-    float last_player_py = 0.0f;
-
-    bool left_pressed = false;
-    bool right_pressed = false;
-    bool down_pressed = false;
-    bool player_on_ground = false;
-    bool player_carrying_ball = false;
-    bool player_jumping = false;
-    bool ball_bouncing = false;
-
-    bool left_pressed_entering_carry_state = false;
-    bool right_pressed_entering_carry_state = false;
-
-    float player_carry_offset = 0.0f;
-    float stored_ball_vx = 0.0f;
-    float stored_ball_vy = 0.0f;
-    float stored_ball_py = 0.0f;
-
-    uint32_t ball_carry_time = 0;
-    uint32_t ball_bounce_time = 0;
-    uint32_t air_time = 0;
-    uint32_t jump_time = 0;
-    uint32_t time_since_jump_press = max_time;
-    uint32_t time_since_jump_release = max_time - 1;
-
-    float camera_y = 0.0f;
-    float camera_focus_y = bricks[0].y;
-
-    brick_t *player_brick = NULL;
-    brick_t *hit_brick = NULL;
-
-    bool game_over = false;
-    uint32_t score = 0;
-
-    while (1) {
-        SDL_Event e;
-        if (SDL_PollEvent(&e)) {
-            if (e.type == SDL_QUIT) {
-                break;
-            }
-            // Ignore key repeats
-            if (e.key.repeat) {
-                goto after_handle_input;
-            }
-            if (e.type == SDL_KEYDOWN) {
-                switch (e.key.keysym.sym) {
-                case SDLK_LEFT:
-                case SDLK_a:
-                    left_pressed = true;
-                    break;
-                case SDLK_RIGHT:
-                case SDLK_d:
-                    right_pressed = true;
-                    break;
-                case SDLK_DOWN:
-                case SDLK_s:
-                    down_pressed = true;
-                    break;
-                case SDLK_r:
-                    goto init;
-                    break;
-                case SDLK_SPACE:
-                    time_since_jump_press = 0;
-                    break;
-                default:
-                    break;
-                }
-            }
-            if (e.type == SDL_KEYUP) {
-                switch (e.key.keysym.sym) {
-                case SDLK_LEFT:
-                case SDLK_a:
-                    left_pressed = false;
-                    break;
-                case SDLK_RIGHT:
-                case SDLK_d:
-                    right_pressed = false;
-                    break;
-                case SDLK_DOWN:
-                case SDLK_s:
-                    down_pressed = false;
-                    break;
-                case SDLK_SPACE:
-                    time_since_jump_release = 0;
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-    after_handle_input:;
-
-        if (game_over) {
-            continue;
-        }
-
-        uint32_t ticks = SDL_GetTicks();
-        if (ticks - last_step_ticks < step_size) {
-            continue;
-        }
-        last_step_ticks = ticks - ticks % step_size;
-
-        // Step ball
-        last_ball_px = ball.px;
-        last_ball_py = ball.py;
-        if (!ball_bouncing) {
-            ball.vy -= steps_per_second * gravity;
-        }
-        ball.px += steps_per_second * ball.vx;
-        ball.py += steps_per_second * ball.vy;
-
-        // Step player
-        last_player_px = player.px;
-        last_player_py = player.py;
-        if (left_pressed ^ right_pressed) {
-            if (left_pressed) {
-                if (player.vx > 0.0f) {
-                    player.vx = pivot(player.vx);
-                } else {
-                    player.vx = -accelerate(-player.vx);
-                }
-            } else {
-                if (player.vx < 0.0f) {
-                    player.vx = -pivot(-player.vx);
-                } else {
-                    player.vx = accelerate(player.vx);
-                }
-            }
-        } else {
-            if (player.vx > 0.0f) {
-                player.vx = decelerate(player.vx);
-            } else {
-                player.vx = -decelerate(-player.vx);
-            }
-        }
-        // Initiate jump if possible
-        if (time_since_jump_press < time_to_buffer_jump) {
-            // Jump has just been pressed or is buffered
-            if (!player_jumping && (player_on_ground || air_time < coyote_time)) {
-                // Player is able to jump
-                player.vy = player_jump_velocity;
-                player_jumping = true;
-                Mix_PlayChannel(-1, sfx_jump, 0);
-            }
-        }
-        if (jump_time > time_to_max_jump) {
-            // Max jump has been reached
-            player_jumping = false;
-        }
-
-        player.vy -= steps_per_second * gravity;
-        player.px += steps_per_second * player.vx;
-        player.py += steps_per_second * player.vy;
-
-        // Squash ball
-        if (player_carrying_ball) {
-            ball.py = player.py + player_height + ball_radius;
-            if (ball_carry_time < time_to_squash) {
-                ball.px = player.px + player_carry_offset;
-                ball_carry_time++;
-            } else {
-                ball.vy = ball_bounce_vy;
-                if (left_pressed ^ right_pressed) {
-                    if (left_pressed) {
-                        if (left_pressed_entering_carry_state) {
-                            ball.vx = -ball_bounce_vx;
-                        } else {
-                            ball.vx = -ball_light_bounce_vx;
-                        }
-                    } else if (right_pressed) {
-                        if (right_pressed_entering_carry_state) {
-                            ball.vx = ball_bounce_vx;
-                        } else {
-                            ball.vx = ball_light_bounce_vx;
-                        }
-                    }
-                } else {
-                    ball.vx = 0.0f;
-                }
-                right_pressed_entering_carry_state = false;
-                left_pressed_entering_carry_state = false;
-                player_carrying_ball = false;
-                ball_carry_time = 0;
-                Mix_PlayChannel(-1, sfx_bounce_end, 0);
-            }
-        }
-        if (ball_bouncing) {
-            if (ball_bounce_time < time_to_squash) {
-                ball_bounce_time++;
-            } else {
-                ball.vx = stored_ball_vx;
-                ball.vy = stored_ball_vy;
-                ball.py = stored_ball_py;
-                ball_bouncing = false;
-                ball_bounce_time = 0;
-
-                // Break brick
-                hit_brick->x = 0;
-                hit_brick->y = 0;
-                hit_brick = NULL;
-                Mix_PlayChannel(-1, sfx_brick_break, 0);
-                score++;
-                if (score > high_score) {
-                    high_score = score;
-                }                
-            }
-        }
-
-        // Check if ball falls off the bottom of screen
-        if (ball.py + ball_radius < camera_y) {
-            game_over = true;
-            Mix_PlayChannel(-1, sfx_game_over, 0);
-        }
-
-        // Check for collision between ball and player
-        if (!player_carrying_ball) {
-            bool collision =
-                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                            positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height) ||
-                check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                            positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height);
-            if (collision && last_ball_py > player.py + player_height && ball.vy < 0) {
-                // Enter carry state
-                player_carry_offset = ball.px - player.px;
-                left_pressed_entering_carry_state = left_pressed;
-                right_pressed_entering_carry_state = right_pressed;
-                player_carrying_ball = true;
-                Mix_PlayChannel(-1, sfx_bounce_start, 0);
-            }
-        }
-
-        // Check for collision between ball and brick or player and brick
-        player_brick = NULL;
-        for (int i = 0; i < max_num_bricks; i++) {
-            brick_t *brick = &bricks[i];
-            if (brick->y + brick_height < camera_y) {
-                // Off-screen bricks don't have collision
-                continue;
-            }
-            {
-                bool collision =
-                    check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                                positive_fmod(brick->x, (float)screen_width), brick->y, brick_width, brick_height) ||
-                    check_collision_circle_rect(positive_fmod(ball.px, (float)screen_width), ball.py, ball_radius,
-                                                positive_fmod(brick->x, (float)screen_width) - screen_width, brick->y, brick_width, brick_height);
-                if (collision && last_ball_py - ball_radius + 0.001f > brick->y + brick_height && ball.vy < 0) {
-                    ball.py = brick->y + brick_height + ball_radius;
-                    ball_bouncing = true;
-                    stored_ball_vx = ball.vx;
-                    stored_ball_vy = -ball_bounce_attenuation * ball.vy;
-                    ball.vx = 0.0f;
-                    ball.vy = 0.0f;
-                    stored_ball_py = ball.py;
-                    hit_brick = brick;
-                    Mix_PlayChannel(-1, sfx_bounce_start, 0);
-                }
-            }
-            {
-                bool collision =
-                    check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
-                                              positive_fmod(brick->x, (float)screen_width), brick->y, brick_width, brick_height) ||
-                    check_collision_rect_rect(positive_fmod(player.px, (float)screen_width), player.py, player_width, player_height,
-                                              positive_fmod(brick->x, (float)screen_width) - screen_width, brick->y, brick_width, brick_height);
-                if (collision && last_player_py + 0.001f > brick->y + brick_height && player.vy < 0) {
-                    camera_focus_y = fmax(camera_focus_y, brick->y);
-                    player_brick = brick;
-                    player.py = brick->y + brick_height;
-                    player.vy = 0.0f;
-                    player_on_ground = true;
-                    player_jumping = false;
-                }
-            }
-        }
-
-        if (player_brick == NULL) {
-            player_on_ground = false;
-        }
-
-        // Move camera
-        float camera_target_y = camera_focus_y - camera_focus_bottom_margin;
-        if (fabs(camera_y - camera_target_y) > 0.001f) {
-            camera_y = (1.0f - camera_move_factor) * camera_y + camera_move_factor * camera_target_y;
-        }
-
-        // Increment counters
-        if (!player_on_ground) {
-            air_time++;
-            if (player_jumping) {
-                jump_time++;
-            }
-        } else {
-            air_time = 0;
-            jump_time = 0;
-        }
-
-        if (time_since_jump_press < max_time) {
-            time_since_jump_press++;
-        }
-        if (time_since_jump_release < max_time - 1) {
-            time_since_jump_release++;
-        }
-
-        // Render
-        SDL_RenderClear(renderer);
-        if (!game_over) {
-            for (int i = 0; i < max_num_bricks; i++) {
-                brick_t *brick = &bricks[i];
-                if (brick->x == 0 && brick->y == 0) {
-                    continue;
-                }
-                SDL_Rect dst_rect = {.x = (int)brick->x, .y = screen_height - (int)(brick->y + brick_height - camera_y), .w = (int)brick_width, .h = (int)brick_height};
-                dst_rect.x = positive_fmod(dst_rect.x, screen_width);
-                SDL_Rect wrap_rect = dst_rect;
-                wrap_rect.x -= screen_width;
-                SDL_RenderCopy(renderer, brick_texture, NULL, &dst_rect);
-                SDL_RenderCopy(renderer, brick_texture, NULL, &wrap_rect);
-            }
-            {
-                SDL_Rect dst_rect = {.x = (int)(ball.px - ball_radius), .y = screen_height - (int)(ball.py + ball_radius - camera_y), .w = (int)(ball_radius * 2), .h = (int)(ball_radius * 2)};
-                if (player_carrying_ball || ball_bouncing) {
-                    const int ball_squash_width = 2.0f * ball_radius;
-                    float x = ball.px - (float)ball_squash_width / 2.0f;
-                    dst_rect.w = ball_squash_width;
-                    dst_rect.x = x;
-                }
-                dst_rect.x = positive_fmod(dst_rect.x, screen_width);
-                SDL_Rect wrap_rect = dst_rect;
-                wrap_rect.x -= screen_width;            
-                if (player_carrying_ball || ball_bouncing) {
-                    SDL_RenderCopy(renderer, ball_squash_texture, NULL, &dst_rect);
-                    SDL_RenderCopy(renderer, ball_squash_texture, NULL, &wrap_rect);
-                } else {
-                    SDL_RenderCopy(renderer, ball_texture, NULL, &dst_rect);
-                    SDL_RenderCopy(renderer, ball_texture, NULL, &wrap_rect);
-                }
-            }
-            {
-                SDL_Rect dst_rect = {.x = (int)player.px, .y = screen_height - (int)(player.py + player_height - camera_y), .w = (int)player_width, .h = (int)player_height};
-                dst_rect.x = positive_fmod(dst_rect.x, screen_width);
-                SDL_Rect wrap_rect = dst_rect;
-                wrap_rect.x -= screen_width;
-                if (player_on_ground || air_time < coyote_time) {
-                    SDL_RenderCopy(renderer, player_texture, NULL, &dst_rect);
-                    SDL_RenderCopy(renderer, player_texture, NULL, &wrap_rect);
-                } else {
-                    if (player_jumping) {
-                        SDL_RenderCopy(renderer, player_jumping_texture, NULL, &dst_rect);
-                        SDL_RenderCopy(renderer, player_jumping_texture, NULL, &wrap_rect);
-                    } else {
-                        SDL_RenderCopy(renderer, player_fall_texture, NULL, &dst_rect);
-                        SDL_RenderCopy(renderer, player_fall_texture, NULL, &wrap_rect);
-                    }
-                }
-            }
-            {
-                int digit = score;
-                int i = 0;
-                do {
-                    SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - 2.0f * glyph_height, glyph_width, glyph_height};
-                    SDL_RenderCopy(renderer, white_number_textures[digit % 10], NULL, &dst_rect);
-                    digit /= 10;
-                    i++;
-                } while (digit > 0);
-            }
-            {
-                int digit = high_score;
-                int i = 0;
-                do {
-                    SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - glyph_height, glyph_width, glyph_height};
-                    SDL_RenderCopy(renderer, yellow_number_textures[digit % 10], NULL, &dst_rect);
-                    digit /= 10;
-                    i++;
-                } while (digit > 0);
-            }            
-        }
-        if (game_over) {
-            SDL_Rect dst_rect = {screen_width * 0.5f - game_over_text_width * 0.5f, screen_height * 0.5f - game_over_text_height * 0.5f, game_over_text_width, game_over_text_height};
-            SDL_RenderCopy(renderer, game_over_text_texture, NULL, &dst_rect);
-        }
-        SDL_RenderPresent(renderer);
-    }
+#endif
 
     Mix_FreeChunk(sfx_jump);
     Mix_FreeChunk(sfx_game_over);
@@ -645,10 +691,9 @@ init:;
 
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(win);
-
     SDL_Quit();
 
-    return 0;
+    return EXIT_SUCCESS;
 }
 
 bool check_collision_rect_rect(float ax, float ay, float aw, float ah, float bx, float by, float bw, float bh) {
@@ -673,7 +718,7 @@ bool check_collision_circle_rect(float cx, float cy, float cr, float rx, float r
     // rect, left, top, right, bottom: definitely colliding
     // top left, top right, bottom left, bottom right: maybe, but need to further check if a corner of the rect is contained in the circle
 
-    // Short-circuit for rect, left, top, right, bottom
+    // Short-circuit for rect, left, top, right, bottom.
     if (cx < rx) {
         if (ry <= cy && cy < ry + rh) {
             return true;
@@ -686,7 +731,7 @@ bool check_collision_circle_rect(float cx, float cy, float cr, float rx, float r
         }
     }
 
-    // Extra check for corner containment in case circle is in a diagonal zone
+    // Extra check for corner containment in case circle is in a diagonal zone.
     float d0 = (rx - cx) * (rx - cx) + (ry - cy) * (ry - cy);
     float d1 = (rx + rw - cx) * (rx + rw - cx) + (ry - cy) * (ry - cy);
     float d2 = (rx - cx) * (rx - cx) + (ry + rh - cy) * (ry + rh - cy);
