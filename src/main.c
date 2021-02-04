@@ -147,12 +147,13 @@ bool should_quit = false;
 void init() {
     gettimeofday(&tv, NULL);
     srand((uint64_t)tv.tv_sec * 1000 + (uint64_t)tv.tv_usec / 1000);
-    float start_x = rand_range(128.0f, screen_width - 128.0f);
-    float start_y = 128.0f;
+    float start_x = rand_range(12.8f * scale, screen_width - 12.8f * scale);
+    float start_y = 12.8f * scale;
 
     ball = (body_t){
         .px = start_x,
         .py = start_y + player_height * 6.0f,
+        .vy = 40.0f * scale,
     };
 
     player = (body_t){
@@ -161,7 +162,7 @@ void init() {
     };
 
     memset(bricks, 0, MAX_NUM_BRICKS * sizeof(brick_t));
-
+    
     bricks[0].x = start_x - brick_width / 2.0f;
     bricks[0].y = start_y;
     bricks[1].x = start_x - brick_width * 3.0f / 2.0f;
@@ -169,13 +170,22 @@ void init() {
     bricks[2].x = start_x + brick_width / 2.0f;
     bricks[2].y = start_y;
 
+    bricks[3].x = start_x - brick_width / 2.0f;
+    bricks[3].y = start_y + 4.0f * player_height;
+
+    // bricks[0].x = start_x - 6.0f * scale;
+    // bricks[0].y = start_y + 6.0f * scale;
+    // bricks[1].x = start_x;
+    // bricks[1].y = start_y + 6.0f * scale;
+
+/*
     float last_x = start_x;
     float last_y = start_y;
 
     {
         int i = 3;
         float x = rand_range(start_x + 3.0f * brick_width, start_x + 6.0f * brick_width);
-        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
         bricks[i].x = last_x - brick_width / 2.0f;
@@ -189,7 +199,7 @@ void init() {
     {
         int i = 6;
         float x = rand_range(start_x - 9.0f * brick_width, start_x - 6.0f * brick_width);
-        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
         bricks[i].x = last_x - brick_width / 2.0f;
@@ -203,7 +213,7 @@ void init() {
     {
         int i = 9;
         float x = rand_range(start_x + 6.0f * brick_width, start_x + 9.0f * brick_width);
-        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
         bricks[i].x = last_x - brick_width / 2.0f;
@@ -216,7 +226,7 @@ void init() {
 
     for (int i = 12; i < 255; i += 3) {
         float x = rand_range(0.0f, 1.0f) > 0.5f ? rand_range(last_x + 3.0f * brick_width, last_x + 6.0f * brick_width) : rand_range(last_x - 9.0f * brick_width, last_x - 6.0f * brick_width);
-        float y = last_y + rand_range(1.5f * player_height, 2.0f * player_height);
+        float y = last_y + rand_range(0.5f * player_height, 1.5f * player_height);
         last_x = x;
         last_y = y;
         bricks[i].x = last_x - brick_width / 2.0f;
@@ -225,8 +235,8 @@ void init() {
         bricks[i + 1].y = last_y;
         bricks[i + 2].x = last_x + brick_width / 2.0f;
         bricks[i + 2].y = last_y;
-    }
-
+    }    
+    */
     next_brick = 0;
 
     last_step_ticks = 0;
