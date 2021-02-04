@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-const char *window_title = "Break Up";
+const char *window_title = "Uphill Break";
 const uint32_t scale = 10;
 const uint32_t screen_width = 84 * scale;
 const uint32_t screen_height = 48 * scale;
@@ -661,6 +661,13 @@ void one_iter() {
 int main(int argc, char** argv) {
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         return EXIT_FAILURE;
+    }
+
+    int image_flags = IMG_INIT_PNG;
+
+    if (IMG_Init(image_flags) != image_flags)
+    {
+        printf("Err: %s\n", IMG_GetError());
     }
 
     if (TTF_Init()) {
