@@ -4,4 +4,4 @@
 
 Made by segault0x61 for Nokia 3310 Jam #3.
 
-To play the game, run `uphill-climb.exe`.
+To play the game, run `uphill-break.exe`.
