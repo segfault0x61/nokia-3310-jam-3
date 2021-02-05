@@ -1,11 +1,22 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#endif
-
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_mixer.h>
+#endif
+
+#ifdef __linux__ 
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_mixer.h>
+#elif _WIN32
+#include <SDL.h>
+#include <SDL_image.h>
+#include <SDL_ttf.h>
+#include <SDL_mixer.h>
+#endif
 
 #include <assert.h>
 #include <math.h>
@@ -658,7 +669,11 @@ void one_iter() {
     SDL_RenderPresent(renderer);
 }
 
-int main(int argc, char** argv) {
+#ifdef WIN32
+int WinMain() {
+#else
+int main() {
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         return EXIT_FAILURE;
     }
