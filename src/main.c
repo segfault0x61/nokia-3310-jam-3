@@ -1,12 +1,13 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_mixer.h>
 #endif
 
-#ifdef __linux__ 
+#ifdef __linux__
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
@@ -103,6 +104,7 @@ bool left_pressed;
 bool right_pressed;
 bool down_pressed;
 bool show_fps_pressed;
+bool toggle_fullscreen_pressed;
 bool reset_pressed;
 bool jump_pressed;
 bool player_on_ground;
@@ -159,6 +161,7 @@ int game_over_text_width, game_over_text_height;
 int fps_text_width, fps_text_height;
 
 bool should_quit = false;
+bool fullscreen = false;
 
 uint32_t frames = 0;
 uint32_t fps = 0;
@@ -267,6 +270,7 @@ void init() {
     right_pressed = false;
     down_pressed = false;
     show_fps_pressed = false;
+    toggle_fullscreen_pressed = false;
     player_on_ground = false;
     player_carrying_ball = false;
     player_jumping = false;
@@ -336,12 +340,25 @@ void one_iter() {
         time_since_jump_release = 0;
     }
 
-    bool show_fps_keystates = keystates[SDL_SCANCODE_F];
+    bool show_fps_keystates = keystates[SDL_SCANCODE_P];
     if (!show_fps_pressed && show_fps_keystates) {
         show_fps_pressed = true;
         show_fps = !show_fps;
     } else if (show_fps_pressed && !show_fps_keystates) {
         show_fps_pressed = false;
+    }
+
+    bool toggle_fullscreen_keystates = keystates[SDL_SCANCODE_F];
+    if (!toggle_fullscreen_pressed && toggle_fullscreen_keystates) {
+        toggle_fullscreen_pressed = true;
+        fullscreen = !fullscreen;
+        if (fullscreen) {
+            SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        } else {
+            SDL_SetWindowFullscreen(win, 0);
+        }
+    } else if (toggle_fullscreen_pressed && !toggle_fullscreen_keystates) {
+        toggle_fullscreen_pressed = false;
     }
 
     if (game_over) {
@@ -695,7 +712,7 @@ int main() {
 
     Mix_Volume(-1, MIX_MAX_VOLUME / 4);
 
-    win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, 0);
+    win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_width, screen_height, 0);
     if (win == NULL) {
         return EXIT_FAILURE;
     }
@@ -710,6 +727,8 @@ int main() {
     }
 
     SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+
+    SDL_RenderSetLogicalSize(renderer, screen_width, screen_height);
 
     loading_surf = IMG_Load("res/ball.png");
     printf("%s\n", IMG_GetError());
