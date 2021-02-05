@@ -32,7 +32,7 @@ $(RELEASE_NAME)-linux-x86_64.tar.gz: $(BINARY_NAME)
 
 linuxtar: $(RELEASE_NAME)-linux-x86_64.tar.gz
 
-index.html index.wasm index.data index.js: ./src/main.c
+index.html index.wasm index.data index.js: ./src/main.c ./web/shell.html
 	emcc $< \
 		-s USE_SDL=2 \
 		-s USE_SDL_IMAGE=2 \
