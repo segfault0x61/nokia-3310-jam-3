@@ -1,5 +1,5 @@
-# Uphill Climb
-A breakout/platformer game crossover made for Nokia 3310 Jam #3 which is available for Windows,Linux and Web.
+# Uphill Break
+A breakout/platformer game crossover made for Nokia 3310 Jam #3 which is available for Windows, Linux and Web.
 
 ## Building 
 To compile, you need to have these libs installed:
