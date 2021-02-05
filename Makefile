@@ -22,10 +22,10 @@ $(RELEASE_NAME)-linux-x86_64.tar.gz: $(BINARY_NAME)
 			$(wildcard res/*.ttf) \
 			$(wildcard res/*.png) \
 			$(wildcard res/*.wav) \
-			/usr/local/lib/libSDL2-2.0.so.0 \
-			/usr/local/lib/libSDL2_image-2.0.so.0 \
-			/usr/local/lib/libSDL2_mixer-2.0.so.0 \
-			/usr/local/lib/libSDL2_ttf-2.0.so.0 \
+			/usr/lib/libSDL2-2.0.so.0 \
+			/usr/lib/libSDL2_image-2.0.so.0 \
+			/usr/lib/libSDL2_mixer-2.0.so.0 \
+			/usr/lib/libSDL2_ttf-2.0.so.0 \
 			$(BINARY_NAME) \
 			pkg/start \
 			pkg/README
