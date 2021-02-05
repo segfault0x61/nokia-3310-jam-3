@@ -1,11 +1,23 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
-#endif
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_mixer.h>
+#endif
+
+#ifdef __linux__
+#include <SDL2/SDL.h>
+#include <SDL2/SDL_image.h>
+#include <SDL2/SDL_ttf.h>
+#include <SDL2/SDL_mixer.h>
+#elif _WIN32
+#include <SDL.h>
+#include <SDL_image.h>
+#include <SDL_ttf.h>
+#include <SDL_mixer.h>
+#endif
 
 #include <assert.h>
 #include <math.h>
@@ -15,7 +27,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-const char *window_title = "Break Up";
+const char *window_title = "Uphill Break";
 const uint32_t scale = 10;
 const uint32_t screen_width = 84 * scale;
 const uint32_t screen_height = 48 * scale;
@@ -60,6 +72,7 @@ const float camera_move_factor = 0.04f;
 #define MAX_NUM_BRICKS 256
 
 const char *game_over_text = " press R to restart ";
+const char *fps_text = "FPS: ";
 
 typedef struct {
     float px, py, vx, vy;
@@ -81,7 +94,7 @@ float positive_fmod(float, float);
 
 int next_brick;
 
-uint32_t last_step_ticks;
+uint32_t last_fps_update_time;
 float last_ball_px;
 float last_ball_py;
 float last_player_px;
@@ -90,6 +103,8 @@ float last_player_py;
 bool left_pressed;
 bool right_pressed;
 bool down_pressed;
+bool show_fps_pressed;
+bool toggle_fullscreen_pressed;
 bool reset_pressed;
 bool jump_pressed;
 bool player_on_ground;
@@ -133,16 +148,24 @@ SDL_Window *win;
 SDL_Renderer *renderer;
 SDL_Surface *loading_surf;
 SDL_Texture *ball_texture, *ball_squash_texture, *player_texture, *player_jump_texture, *player_fall_texture, *brick_texture;
-SDL_Texture *white_number_textures[10];
-SDL_Texture *yellow_number_textures[10];
+SDL_Texture *white_on_black_number_textures[10];
+SDL_Texture *score_number_textures[10];
+SDL_Texture *highscore_number_textures[10];
 SDL_Texture *game_over_text_texture;
+SDL_Texture *fps_text_texture;
 Mix_Chunk *sfx_jump, *sfx_game_over, *sfx_bounce_start, *sfx_bounce_end, *sfx_brick_break;
 TTF_Font *font;
 
 int glyph_width, glyph_height;
 int game_over_text_width, game_over_text_height;
+int fps_text_width, fps_text_height;
 
 bool should_quit = false;
+bool fullscreen = false;
+
+uint32_t frames = 0;
+uint32_t fps = 0;
+bool show_fps = false;
 
 void init() {
     gettimeofday(&tv, NULL);
@@ -237,7 +260,7 @@ void init() {
     
     next_brick = 0;
 
-    last_step_ticks = 0;
+    last_fps_update_time = 0;
     last_ball_px = 0.0f;
     last_ball_py = 0.0f;
     last_player_px = 0.0f;
@@ -246,6 +269,8 @@ void init() {
     left_pressed = false;
     right_pressed = false;
     down_pressed = false;
+    show_fps_pressed = false;
+    toggle_fullscreen_pressed = false;
     player_on_ground = false;
     player_carrying_ball = false;
     player_jumping = false;
@@ -283,6 +308,16 @@ void one_iter() {
             return;
         }
     }
+
+    frames++;
+    uint32_t ticks = SDL_GetTicks();
+    uint32_t delta = ticks - last_fps_update_time;
+    if (delta > 200) {
+        fps = (float)frames / (float)delta * 1000.0f;
+        last_fps_update_time = ticks;
+        frames = 0;
+    }
+
     const Uint8 *keystates = SDL_GetKeyboardState(NULL);
     left_pressed = keystates[SDL_SCANCODE_A] || keystates[SDL_SCANCODE_LEFT];
     right_pressed = keystates[SDL_SCANCODE_D] || keystates[SDL_SCANCODE_RIGHT];
@@ -292,9 +327,7 @@ void one_iter() {
         reset_pressed = keystates[SDL_SCANCODE_R];
         init();
         return;
-    }
-
-    if (reset_pressed && !keystates[SDL_SCANCODE_R]) {
+    } else if (reset_pressed && !keystates[SDL_SCANCODE_R]) {
         reset_pressed = keystates[SDL_SCANCODE_R];
     }
 
@@ -302,11 +335,30 @@ void one_iter() {
     if (!jump_pressed && jump_keystates) {
         jump_pressed = jump_keystates;
         time_since_jump_press = 0;
-    }
-
-    if (jump_pressed && !jump_keystates) {
+    } else if (jump_pressed && !jump_keystates) {
         jump_pressed = jump_keystates;
         time_since_jump_release = 0;
+    }
+
+    bool show_fps_keystates = keystates[SDL_SCANCODE_P];
+    if (!show_fps_pressed && show_fps_keystates) {
+        show_fps_pressed = true;
+        show_fps = !show_fps;
+    } else if (show_fps_pressed && !show_fps_keystates) {
+        show_fps_pressed = false;
+    }
+
+    bool toggle_fullscreen_keystates = keystates[SDL_SCANCODE_F];
+    if (!toggle_fullscreen_pressed && toggle_fullscreen_keystates) {
+        toggle_fullscreen_pressed = true;
+        fullscreen = !fullscreen;
+        if (fullscreen) {
+            SDL_SetWindowFullscreen(win, SDL_WINDOW_FULLSCREEN_DESKTOP);
+        } else {
+            SDL_SetWindowFullscreen(win, 0);
+        }
+    } else if (toggle_fullscreen_pressed && !toggle_fullscreen_keystates) {
+        toggle_fullscreen_pressed = false;
     }
 
     if (game_over) {
@@ -594,7 +646,7 @@ void one_iter() {
             int i = 0;
             do {
                 SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - 2.0f * glyph_height, glyph_width, glyph_height};
-                SDL_RenderCopy(renderer, white_number_textures[digit % 10], NULL, &dst_rect);
+                SDL_RenderCopy(renderer, score_number_textures[digit % 10], NULL, &dst_rect);
                 digit /= 10;
                 i++;
             } while (digit > 0);
@@ -604,12 +656,28 @@ void one_iter() {
             int i = 0;
             do {
                 SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), screen_height - glyph_height, glyph_width, glyph_height};
-                SDL_RenderCopy(renderer, yellow_number_textures[digit % 10], NULL, &dst_rect);
+                SDL_RenderCopy(renderer, highscore_number_textures[digit % 10], NULL, &dst_rect);
                 digit /= 10;
                 i++;
             } while (digit > 0);
-        }
+        }      
     }
+
+    if (show_fps) {
+        {
+            int digit = fps;
+            int i = 0;
+            do {
+                SDL_Rect dst_rect = {screen_width - glyph_width * (i + 1), 0, glyph_width, glyph_height};
+                SDL_RenderCopy(renderer, white_on_black_number_textures[digit % 10], NULL, &dst_rect);
+                digit /= 10;
+                i++;
+            } while (digit > 0);
+            SDL_Rect dst_rect = {screen_width - glyph_width * i - fps_text_width, 0, fps_text_width, fps_text_height};
+            SDL_RenderCopy(renderer, fps_text_texture, NULL, &dst_rect);
+        }  
+    }
+
     if (game_over) {
         SDL_Rect dst_rect = {screen_width * 0.5f - game_over_text_width * 0.5f, screen_height * 0.5f - game_over_text_height * 0.5f, game_over_text_width, game_over_text_height};
         SDL_RenderCopy(renderer, game_over_text_texture, NULL, &dst_rect);
@@ -618,9 +686,20 @@ void one_iter() {
     SDL_RenderPresent(renderer);
 }
 
-int main(int argc, char** argv) {
+#ifdef WIN32
+int WinMain() {
+#else
+int main() {
+#endif
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         return EXIT_FAILURE;
+    }
+
+    int image_flags = IMG_INIT_PNG;
+
+    if (IMG_Init(image_flags) != image_flags)
+    {
+        printf("Err: %s\n", IMG_GetError());
     }
 
     if (TTF_Init()) {
@@ -633,7 +712,7 @@ int main(int argc, char** argv) {
 
     Mix_Volume(-1, MIX_MAX_VOLUME / 4);
 
-    win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, screen_width, screen_height, 0);
+    win = SDL_CreateWindow(window_title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, screen_width, screen_height, 0);
     if (win == NULL) {
         return EXIT_FAILURE;
     }
@@ -642,12 +721,14 @@ int main(int argc, char** argv) {
     SDL_SetWindowIcon(win, icon);
     SDL_FreeSurface(icon);
 
-    renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED);
+    renderer = SDL_CreateRenderer(win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (renderer == NULL) {
         return EXIT_FAILURE;
     }
 
     SDL_SetRenderDrawColor(renderer, bg_color.r, bg_color.g, bg_color.b, bg_color.a);
+
+    SDL_RenderSetLogicalSize(renderer, screen_width, screen_height);
 
     loading_surf = IMG_Load("res/ball.png");
     printf("%s\n", IMG_GetError());
@@ -672,17 +753,25 @@ int main(int argc, char** argv) {
     assert(font != NULL);
 
     TTF_SizeText(font, "a", &glyph_width, &glyph_height);
+    SDL_Color white = {255, 255, 255, 255};
+    SDL_Color black = {0, 0, 0, 255};    
     SDL_Color text_color = { 0x43, 0x52, 0x3D, 0xFF };    
     for (int i = 0; i < 10; i++) {
+        loading_surf = TTF_RenderGlyph_Shaded(font, '0' + i, white, black);
+        white_on_black_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
         loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
-        white_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
+        score_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
         loading_surf = TTF_RenderGlyph_Blended(font, '0' + i, text_color);
-        yellow_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
+        highscore_number_textures[i] = SDL_CreateTextureFromSurface(renderer, loading_surf);
     }
 
     TTF_SizeText(font, game_over_text, &game_over_text_width, &game_over_text_height);
     loading_surf = TTF_RenderText_Shaded(font, game_over_text, text_color, bg_color);
     game_over_text_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
+
+    TTF_SizeText(font, fps_text, &fps_text_width, &fps_text_height);
+    loading_surf = TTF_RenderText_Shaded(font, fps_text, white, black);
+    fps_text_texture = SDL_CreateTextureFromSurface(renderer, loading_surf);
 
     sfx_jump = Mix_LoadWAV("res/jump.wav");
     assert(sfx_jump != NULL);
@@ -698,7 +787,7 @@ int main(int argc, char** argv) {
     init();
 
 #ifdef __EMSCRIPTEN__
-    emscripten_set_main_loop(one_iter, 0, 1);
+    emscripten_set_main_loop(one_iter, 60, 1);
 #else
     while (!should_quit) {
         one_iter();
